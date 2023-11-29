@@ -10,15 +10,14 @@ void test_cope(NetIO *io, int party) {
   Cope<NetIO> cope(party, io, MERSENNE_PRIME_EXP);
 
   PRG prg;
-  __uint128_t Delta;
-  prg.random_data(&Delta, sizeof(__uint128_t));
-  Delta = Delta & ((__uint128_t)0xFFFFFFFFFFFFFFFFLL);
-  Delta = mod(Delta, pr);
+  uint64_t Delta;
+  prg.random_data(&Delta, sizeof(uint64_t));
+  Delta = mod(Delta);
 
   int test_n = 1024 * 128;
-  __uint128_t mac[test_n];
 
   // test batch
+  uint64_t *mac = new uint64_t[test_n];
   if (party == ALICE) {
     cope.initialize(Delta);
     cope.extend(mac, test_n);
@@ -38,6 +37,7 @@ void test_cope(NetIO *io, int party) {
     cope.check_triple(u, mac, test_n);
     delete[] u;
   }
+  delete[] mac;
 }
 
 int main(int argc, char **argv) {

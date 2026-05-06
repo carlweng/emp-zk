@@ -30,13 +30,13 @@ int main(int argc, char **argv) {
   memset(witness, false, 512);
   bool *output = new bool[256];
   get_plain(output, witness, filename.c_str());
-  BoolIO<NetIO> *ios[threads];
+  BoolIO *ios[threads];
   for (int i = 0; i < threads; ++i)
-    ios[i] = new BoolIO<NetIO>(
+    ios[i] = new BoolIO(
         new NetIO(party == ALICE ? nullptr : "127.0.0.1", port + i),
         party == ALICE);
 
-  setup_zk_bool<BoolIO<NetIO>>(ios, threads, party);
+  setup_zk_bool(ios, threads, party);
   vector<Bit> W, O;
   for (int i = 0; i < 512; ++i)
     W.push_back(Bit(witness[i], ALICE));
@@ -54,12 +54,12 @@ int main(int argc, char **argv) {
       error("wrong");
   }
 
-  bool cheated = finalize_zk_bool<BoolIO<NetIO>>();
+  bool cheated = finalize_zk_bool();
   if (cheated)
     error("cheated\n");
 
   for (int i = 0; i < threads; ++i) {
-    NetIO *raw = ios[i]->io;
+    NetIO *raw = static_cast<NetIO *>(ios[i]->io);
     delete ios[i];
     delete raw;
   }

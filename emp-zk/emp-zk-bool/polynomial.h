@@ -11,10 +11,10 @@ using namespace emp;
 // emp-zk doesn't link emp-sh2pc, so re-introduce the alias locally.
 using Integer = SignedInt;
 
-template <typename IO> class PolyProof {
+class PolyProof {
 public:
   int party;
-  IO *io;
+  IOChannel *io;
   block delta;
   int buffer_sz = 1000 * 1000;
   // int buffer_sz = 4096;
@@ -24,7 +24,7 @@ public:
   GaloisFieldPacking pack;
   FerretCOT *ferret = nullptr;
 
-  PolyProof(int party, IO *io, FerretCOT *ferret) {
+  PolyProof(int party, IOChannel *io, FerretCOT *ferret) {
     this->party = party;
     this->io = io;
     this->ferret = ferret;

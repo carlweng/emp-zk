@@ -8,14 +8,14 @@ int port, party;
 int sz, repeat;
 const int threads = 1;
 
-void test_polynomial(BoolIO<NetIO> *ios[threads], int party) {
+void test_polynomial(BoolIO *ios[threads], int party) {
   srand(time(NULL));
   bool *coeff = new bool[sz + 1];
   bool *witness = new bool[2 * sz];
   memset(witness, 0, 2 * sz * sizeof(bool));
 
-  setup_zk_bool<BoolIO<NetIO>>(ios, threads, party);
-  sync_zk_bool<BoolIO<NetIO>>();
+  setup_zk_bool(ios, threads, party);
+  sync_zk_bool();
 
   Bit *x = new Bit[2 * sz];
 
@@ -38,13 +38,13 @@ void test_polynomial(BoolIO<NetIO> *ios[threads], int party) {
   for (int i = 0; i < 2 * sz; ++i)
     x[i] = Bit(witness[i], ALICE);
 
-  sync_zk_bool<BoolIO<NetIO>>();
+  sync_zk_bool();
   auto start = clock_start();
   for (int j = 0; j < repeat; ++j) {
-    zkp_poly_deg2<BoolIO<NetIO>>(x, x + sz, coeff, sz);
+    zkp_poly_deg2(x, x + sz, coeff, sz);
   }
 
-  bool cheated = finalize_zk_bool<BoolIO<NetIO>>();
+  bool cheated = finalize_zk_bool();
   if (cheated)
     error("cheated\n");
 
@@ -60,9 +60,9 @@ void test_polynomial(BoolIO<NetIO> *ios[threads], int party) {
 
 int main(int argc, char **argv) {
   parse_party_and_port(argv, &party, &port);
-  BoolIO<NetIO> *ios[threads];
+  BoolIO *ios[threads];
   for (int i = 0; i < threads; ++i)
-    ios[i] = new BoolIO<NetIO>(
+    ios[i] = new BoolIO(
         new NetIO(party == ALICE ? nullptr : "127.0.0.1", port + i),
         party == ALICE);
 
@@ -86,7 +86,7 @@ int main(int argc, char **argv) {
   test_polynomial(ios, party);
 
   for (int i = 0; i < threads; ++i) {
-    NetIO *raw = ios[i]->io;
+    NetIO *raw = static_cast<NetIO *>(ios[i]->io);
     delete ios[i];
     delete raw;
   }

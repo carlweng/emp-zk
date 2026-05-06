@@ -46,7 +46,7 @@ void check_triple(const block delta,
 
 void test_vole_triple(
   NetIO **ios, 
-  BoolIO<NetIO> **ios_bool,
+  BoolIO **ios_bool,
   int party) {
   // instantiate OT (FerretCOT is no longer templated on IO; takes
   // a polymorphic IOChannel** at construction)
@@ -54,7 +54,7 @@ void test_vole_triple(
     3 - party, threads, reinterpret_cast<IOChannel **>(ios_bool), true);
 
   // instantiate F2K VOLE
-  SVoleF2k<BoolIO<NetIO>> vtriple(
+  SVoleF2k<BoolIO> vtriple(
     party, threads, ios_bool, &ferretcot);
 
   PRG prg;
@@ -104,9 +104,9 @@ int main(int argc, char **argv) {
     ios[i] = new NetIO(party == ALICE ? nullptr : "127.0.0.1", port + i);
 
 
-  BoolIO<NetIO> *ios_bool[threads];
+  BoolIO *ios_bool[threads];
   for (int i = 0; i < threads; ++i)
-    ios_bool[i] = new BoolIO<NetIO>(
+    ios_bool[i] = new BoolIO(
         ios[i], party == ALICE);
 
 

@@ -16,7 +16,7 @@ using namespace std;
 int port, party;
 const int threads = 1;
 
-void test_sis_proof(BoolIO<NetIO> *ios[threads + 1], int party, int n, int m) {
+void test_sis_proof(BoolIO *ios[threads + 1], int party, int n, int m) {
 
   srand(time(NULL));
 
@@ -40,7 +40,7 @@ void test_sis_proof(BoolIO<NetIO> *ios[threads + 1], int party, int n, int m) {
 
   int repeat = 485;
   auto start = clock_start();
-  setup_zk_arith<BoolIO<NetIO>>(ios, threads, party);
+  setup_zk_arith<BoolIO>(ios, threads, party);
 
   // allocation
   IntFp *vec_s = new IntFp[m];
@@ -77,7 +77,7 @@ void test_sis_proof(BoolIO<NetIO> *ios[threads + 1], int party, int n, int m) {
   }
 
   bool ret = batch_reveal_check(vec_t, t, n + m);
-  finalize_zk_arith<BoolIO<NetIO>>();
+  finalize_zk_arith<BoolIO>();
   auto timeuse = time_from(start);
   cout << n << "\t" << m << "\t" << timeuse / tt << " us\t" << party << " "
        << ret << endl;
@@ -111,9 +111,9 @@ void test_sis_proof(BoolIO<NetIO> *ios[threads + 1], int party, int n, int m) {
 
 int main(int argc, char **argv) {
   parse_party_and_port(argv, &party, &port);
-  BoolIO<NetIO> *ios[threads + 1];
+  BoolIO *ios[threads + 1];
   for (int i = 0; i < threads + 1; ++i)
-    ios[i] = new BoolIO<NetIO>(
+    ios[i] = new BoolIO(
         new NetIO(party == ALICE ? nullptr : "127.0.0.1", port + i),
         party == ALICE);
 
@@ -128,7 +128,7 @@ int main(int argc, char **argv) {
   //	test_sis_proof(ios, party, 256, 256*61);
 
   for (int i = 0; i < threads + 1; ++i) {
-    NetIO *raw = ios[i]->io;
+    NetIO *raw = static_cast<NetIO *>(ios[i]->io);
     delete ios[i];
     delete raw;
   }

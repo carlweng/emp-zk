@@ -5,14 +5,14 @@
 
 using namespace emp;
 
-template <typename IO> class TripleAuth {
+class TripleAuth {
 public:
   int party;
   Hash hash;
   block choice[2];
   vector<block> tmp;
-  IO *io;
-  TripleAuth(int party, IO *io) {
+  IOChannel *io;
+  TripleAuth(int party, IOChannel *io) {
     this->io = io;
     this->party = party;
     choice[0] = zero_block;

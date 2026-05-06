@@ -30,7 +30,7 @@ public:
     val_uint64_sz = (val_sz + 63) / 64;
     if (_party == ALICE)
       mem.resize(capacity);
-    auto *exec = emp::get_bool_backend<IO>();
+    auto *exec = emp::get_bool_backend();
     io = exec->ostriple->io;
     Delta = exec->ostriple->delta;
     ostriple =
@@ -246,7 +246,7 @@ public:
       throw invalid_argument("zk ram ext check error\n");
     }
 
-    sync_zk_bool<IO>();
+    sync_zk_bool();
     vector<vector<block>> sorted_MAC(step);
     // Now check that sort_value, sort_index, sort_step, sort_op is consistent
     // with the other set of values

@@ -9,10 +9,13 @@
 // ProtocolExecution::prot_exec. Backend collapses both singletons
 // into one virtual interface, and the prover- and verifier-side
 // state is small enough to live on a single Backend subclass per
-// party — no helper proxy, no composition layer. The host file
-// (emp-zk-bool.h) installs / tears down `backend` via setup_zk_bool
-// / finalize_zk_bool; cross-module consumers reach the per-side
-// instance through the get_bool_* accessors at the bottom.
+// party — no helper proxy, no composition layer.
+//
+// De-templated alongside the rest of the toolkit (emp-tool / emp-ot
+// / emp-sh2pc): `io` is an IOChannel*, `ios` is an IOChannel**,
+// and consumers no longer carry a `<NetIO>` / `<BoolIO>` template
+// parameter through. Wires stay block (the GC-style label) and the
+// gate ops keep the same shape.
 
 #include <emp-tool/emp-tool.h>
 
@@ -27,13 +30,13 @@ namespace emp {
 // public-input label table) and implements the symmetric gate ops
 // (AND / XOR / public-label). NOT and feed/reveal differ between
 // sides and live on the subclasses.
-template <typename IO> class ZKBoolBackendBase : public Backend {
+class ZKBoolBackendBase : public Backend {
 public:
   int64_t gid = 0;
   block pub_label[2];
-  IO *io = nullptr;
-  OSTriple<IO> *ostriple = nullptr;
-  PolyProof<IO> *polyproof = nullptr;
+  BoolIO *io = nullptr;
+  OSTriple *ostriple = nullptr;
+  PolyProof *polyproof = nullptr;
 
   ZKBoolBackendBase(int p) : Backend(p) {}
   ~ZKBoolBackendBase() override {
@@ -79,15 +82,10 @@ public:
 // Prover side. NOT is the canonical XOR-with-1 trick; reveal()
 // either returns the LSB locally (to_party == ALICE) or runs the
 // MAC-checked verify_output protocol (to_party == BOB / PUBLIC).
-template <typename IO> class ZKBoolBackendPrv : public ZKBoolBackendBase<IO> {
+class ZKBoolBackendPrv : public ZKBoolBackendBase {
 public:
-  using base = ZKBoolBackendBase<IO>;
-  using base::io;
-  using base::ostriple;
-  using base::polyproof;
-  using base::pub_label;
-
-  ZKBoolBackendPrv(IO **ios, int threads, void *state) : base(ALICE) {
+  ZKBoolBackendPrv(BoolIO **ios, int threads, void *state)
+      : ZKBoolBackendBase(ALICE) {
     PRG prg(fix_key);
     prg.random_block(pub_label, 2);
     pub_label[0] =
@@ -97,8 +95,8 @@ public:
     pub_label[1] = pub_label[1] ^ makeBlock(0, 1);
 
     io = ios[0];
-    ostriple = new OSTriple<IO>(ALICE, threads, ios, state);
-    polyproof = new PolyProof<IO>(ALICE, ios[0], ostriple->ferret);
+    ostriple = new OSTriple(ALICE, threads, ios, state);
+    polyproof = new PolyProof(ALICE, ios[0], ostriple->ferret);
   }
 
   void not_gate(void *o, const void *in) override {
@@ -121,17 +119,12 @@ public:
 // (= delta ^ 1) so that authenticated wires keep their MAC under
 // negation. reveal() only handles the BOB/PUBLIC case (the verifier
 // never has a value to reveal locally).
-template <typename IO> class ZKBoolBackendVer : public ZKBoolBackendBase<IO> {
+class ZKBoolBackendVer : public ZKBoolBackendBase {
 public:
-  using base = ZKBoolBackendBase<IO>;
-  using base::io;
-  using base::ostriple;
-  using base::polyproof;
-  using base::pub_label;
-
   block delta, zdelta;
 
-  ZKBoolBackendVer(IO **ios, int threads, void *state) : base(BOB) {
+  ZKBoolBackendVer(BoolIO **ios, int threads, void *state)
+      : ZKBoolBackendBase(BOB) {
     PRG prg(fix_key);
     prg.random_block(pub_label, 2);
     pub_label[0] =
@@ -140,8 +133,8 @@ public:
         pub_label[1] & makeBlock(0xFFFFFFFFFFFFFFFFULL, 0xFFFFFFFFFFFFFFFEULL);
 
     io = ios[0];
-    ostriple = new OSTriple<IO>(BOB, threads, ios, state);
-    polyproof = new PolyProof<IO>(BOB, ios[0], ostriple->ferret);
+    ostriple = new OSTriple(BOB, threads, ios, state);
+    polyproof = new PolyProof(BOB, ios[0], ostriple->ferret);
     polyproof->delta = ostriple->delta;
 
     delta = ostriple->delta;
@@ -162,29 +155,23 @@ public:
 // Cross-module accessors. edabit / arith / ram-zk reach into the
 // bool backend for ostriple / polyproof / delta — the cast asserts
 // in debug if the global `backend` isn't actually one of ours.
-template <typename IO> inline ZKBoolBackendBase<IO> *get_bool_backend() {
-  return static_cast<ZKBoolBackendBase<IO> *>(backend);
+inline ZKBoolBackendBase *get_bool_backend() {
+  return static_cast<ZKBoolBackendBase *>(backend);
 }
-template <typename IO> inline ZKBoolBackendPrv<IO> *get_bool_backend_prv() {
-  return static_cast<ZKBoolBackendPrv<IO> *>(backend);
+inline ZKBoolBackendPrv *get_bool_backend_prv() {
+  return static_cast<ZKBoolBackendPrv *>(backend);
 }
-template <typename IO> inline ZKBoolBackendVer<IO> *get_bool_backend_ver() {
-  return static_cast<ZKBoolBackendVer<IO> *>(backend);
+inline ZKBoolBackendVer *get_bool_backend_ver() {
+  return static_cast<ZKBoolBackendVer *>(backend);
 }
 
 // Source-compat aliases so existing callers keep building. The
 // returned pointer no longer points at a separate ZKBoolCircExec
 // object; it's the Backend subclass itself, which carries the same
 // ostriple / polyproof / delta members.
-template <typename IO> inline ZKBoolBackendBase<IO> *get_bool_circ() {
-  return get_bool_backend<IO>();
-}
-template <typename IO> inline ZKBoolBackendPrv<IO> *get_bool_circ_prv() {
-  return get_bool_backend_prv<IO>();
-}
-template <typename IO> inline ZKBoolBackendVer<IO> *get_bool_circ_ver() {
-  return get_bool_backend_ver<IO>();
-}
+inline ZKBoolBackendBase *get_bool_circ() { return get_bool_backend(); }
+inline ZKBoolBackendPrv *get_bool_circ_prv() { return get_bool_backend_prv(); }
+inline ZKBoolBackendVer *get_bool_circ_ver() { return get_bool_backend_ver(); }
 
 } // namespace emp
 #endif

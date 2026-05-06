@@ -8,10 +8,10 @@ int port, party;
 const int threads = 1;
 int index_sz = 5, step_sz = 18, val_sz = 128;
 
-void test(BoolIO<NetIO> *ios[threads], int party) {
-  setup_zk_bool<BoolIO<NetIO>>(ios, threads, party);
-  ZkRamExt<BoolIO<NetIO>> *ram =
-      new ZkRamExt<BoolIO<NetIO>>(party, index_sz, step_sz, val_sz);
+void test(BoolIO *ios[threads], int party) {
+  setup_zk_bool(ios, threads, party);
+  ZkRamExt<BoolIO> *ram =
+      new ZkRamExt<BoolIO>(party, index_sz, step_sz, val_sz);
 
   uint64_t block_sz = (val_sz + 63) / 64;
   vector<Integer> val(block_sz);
@@ -48,15 +48,15 @@ void test(BoolIO<NetIO> *ios[threads], int party) {
   }
   ram->check();*/
   delete ram;
-  finalize_zk_bool<BoolIO<NetIO>>();
+  finalize_zk_bool();
   cout << "done\n";
 }
 
 int main(int argc, char **argv) {
   parse_party_and_port(argv, &party, &port);
-  BoolIO<NetIO> *ios[threads];
+  BoolIO *ios[threads];
   for (int i = 0; i < threads; ++i)
-    ios[i] = new BoolIO<NetIO>(
+    ios[i] = new BoolIO(
         new NetIO(party == ALICE ? nullptr : "127.0.0.1", port),
         party == ALICE);
 
@@ -67,7 +67,7 @@ int main(int argc, char **argv) {
   // bench(ios, party);
 
   for (int i = 0; i < threads; ++i) {
-    NetIO *raw = ios[i]->io;
+    NetIO *raw = static_cast<NetIO *>(ios[i]->io);
     delete ios[i];
     delete raw;
   }

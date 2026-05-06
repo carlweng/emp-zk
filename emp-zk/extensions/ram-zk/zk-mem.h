@@ -21,7 +21,7 @@ public:
       : party(_party), index_sz(index_sz), step_sz(step_sz), val_sz(val_sz) {
     capacity = (capacity << index_sz);
     mem.resize(capacity);
-    auto *exec = emp::get_bool_backend<IO>();
+    auto *exec = emp::get_bool_backend();
     io = exec->ostriple->io;
     Delta = exec->ostriple->delta;
     ostriple =
@@ -166,7 +166,7 @@ public:
     if (!condition.reveal())
       cout << "wrong!!\n";
 
-    sync_zk_bool<IO>();
+    sync_zk_bool();
     vector<block> sorted_MAC;
     // Now check that sort_value, sort_index, sort_step, sort_op is consistent
     // with the other set of values

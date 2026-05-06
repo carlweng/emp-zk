@@ -12,7 +12,7 @@
 // pattern emp-vole uses today (emp-vole/utility.h line 4).
 using namespace emp;
 
-template <typename IO> class OSTriple {
+class OSTriple {
 public:
   int party, threads;
   block delta;
@@ -28,23 +28,21 @@ public:
 
   block choice[2], choice2[2];
   block minusone, one;
-  IO *io;
-  IO **ios;
+  BoolIO *io;
+  BoolIO **ios;
   PRG prg;
   FerretCOT *ferret = nullptr;
-  TripleAuth<IO> *auth_helper;
+  TripleAuth *auth_helper;
   ThreadPool *pool = nullptr;
   void *ferret_state = nullptr;
 
-  OSTriple(int party, int threads, IO **ios, void *state = nullptr) {
+  OSTriple(int party, int threads, BoolIO **ios, void *state = nullptr) {
     this->party = party;
     this->threads = threads;
     this->ferret_state = state;
-    // FerretCOT (emp-ot main) is no longer templated on IO and takes a
-    // polymorphic IOChannel**. The reinterpret_cast is safe so long as
-    // IO is a single-inheritance public subclass of IOChannel with the
-    // IOChannel subobject at offset 0 (true for NetIO, BoolIO<NetIO>,
-    // and every shipped emp-tool channel).
+    // FerretCOT takes IOChannel**; BoolIO is a single-inheritance public
+    // subclass with the IOChannel subobject at offset 0, so the cast is
+    // a no-op at runtime.
     IOChannel **iochan_ios = reinterpret_cast<IOChannel **>(ios);
     if (ferret_state == nullptr)
       ferret = new FerretCOT(3 - party, threads, iochan_ios, true);
@@ -70,7 +68,7 @@ public:
     one = makeBlock(0x0L, 0x1L);
     choice2[1] = one;
 
-    auth_helper = new TripleAuth<IO>(party, io);
+    auth_helper = new TripleAuth(party, io);
     if (party == BOB)
       auth_helper->set_delta(this->delta);
   }
@@ -300,7 +298,7 @@ public:
 
   /* ---------------------debug functions----------------------*/
 
-  void check_auth_mac(block *auth, bool *in, int len, IO *tio) {
+  void check_auth_mac(block *auth, bool *in, int len, IOChannel *tio) {
     if (party == ALICE) {
       tio->send_data(auth, len * sizeof(block));
       tio->send_data(in, len * sizeof(bool));
@@ -319,7 +317,7 @@ public:
       delete[] auth_recv;
     }
   }
-  void check_compute_and(block *a, block *b, block *c, int len, IO *tio) {
+  void check_compute_and(block *a, block *b, block *c, int len, IOChannel *tio) {
     if (party == ALICE) {
       tio->send_data(a, len * sizeof(block));
       tio->send_data(b, len * sizeof(block));

@@ -19,7 +19,7 @@ public:
   F2kOSTriple<IO> *ostriple = nullptr;
   ROZKRAM(int _party, int index_sz, int val_sz)
       : party(_party), index_sz(index_sz), val_sz(val_sz) {
-    auto *exec = emp::get_bool_backend<IO>();
+    auto *exec = emp::get_bool_backend();
     io = exec->ostriple->io;
     Delta = exec->ostriple->delta;
     ostriple =
@@ -113,7 +113,7 @@ public:
     check2 += time_from(start);
 
     start = clock_start();
-    sync_zk_bool<IO>();
+    sync_zk_bool();
     check_set_euqality(sorted_list, sorted_MAC, list, check_MAC);
     check3 += time_from(start);
     list.resize(clear_mem.size());

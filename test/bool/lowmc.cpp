@@ -10,11 +10,11 @@ const int threads = 1;
 
 using namespace std;
 
-void test_lowmc(BoolIO<NetIO> *ios[threads], int party) {
+void test_lowmc(BoolIO *ios[threads], int party) {
   unsigned nblocks = 10;
   unsigned test_sz = nblocks * blocksize;
-  setup_zk_bool<BoolIO<NetIO>>(ios, threads, party);
-  sync_zk_bool<BoolIO<NetIO>>();
+  setup_zk_bool(ios, threads, party);
+  sync_zk_bool();
 
   bool *key_b = new bool[keysize];
   bool *ptx_b = new bool[test_sz];
@@ -42,7 +42,7 @@ void test_lowmc(BoolIO<NetIO> *ios[threads], int party) {
 
   backend->reveal(ctx_rev, PUBLIC, (block *)ctx, test_sz);
 
-  bool cheated = finalize_zk_bool<BoolIO<NetIO>>();
+  bool cheated = finalize_zk_bool();
   if (cheated)
     error("cheated\n");
 
@@ -63,9 +63,9 @@ void test_lowmc(BoolIO<NetIO> *ios[threads], int party) {
 
 int main(int argc, char **argv) {
   parse_party_and_port(argv, &party, &port);
-  BoolIO<NetIO> *ios[threads];
+  BoolIO *ios[threads];
   for (int i = 0; i < threads; ++i)
-    ios[i] = new BoolIO<NetIO>(
+    ios[i] = new BoolIO(
         new NetIO(party == ALICE ? nullptr : "127.0.0.1", port + i),
         party == ALICE);
 
@@ -77,7 +77,7 @@ int main(int argc, char **argv) {
   test_lowmc(ios, party);
 
   for (int i = 0; i < threads; ++i) {
-    NetIO *raw = ios[i]->io;
+    NetIO *raw = static_cast<NetIO *>(ios[i]->io);
     delete ios[i];
     delete raw;
   }

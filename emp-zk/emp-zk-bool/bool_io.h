@@ -3,18 +3,20 @@
 #include "emp-tool/emp-tool.h"
 
 namespace emp {
-// IOChannel went from CRTP-templated to a polymorphic virtual base in
-// emp-tool main; counter is now public on the base, so the
-// previously-needed `using IOChannel<...>::counter` is gone.
-template <typename IO> class BoolIO : public IOChannel {
+// Bit-level IOChannel adapter for emp-zk-bool. De-templated alongside
+// emp-tool main's switch from CRTP IOChannel<T> to a polymorphic
+// virtual base — `io` is now an IOChannel*, send/recv go through
+// the base's virtual dispatch, and consumers pass plain BoolIO* /
+// IOChannel* without `<NetIO>` template baggage.
+class BoolIO : public IOChannel {
 public:
-  IO *io;
+  IOChannel *io;
   Hash hash; // modelled as RO
   bool *buf;
   int ptr;
   bool sender;
   vector<unsigned char> tmp_arr;
-  BoolIO(IO *io, int sender) : io(io), sender(sender) {
+  BoolIO(IOChannel *io, int sender) : io(io), sender(sender) {
     buf = new bool[NETWORK_BUFFER_SIZE2];
     if (sender)
       ptr = 0;
@@ -25,7 +27,7 @@ public:
     this->flush();
     delete[] buf;
   }
-  void flush() {
+  void flush() override {
     if (sender) {
       if (ptr != 0) {
         bool data = true;

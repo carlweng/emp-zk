@@ -7,7 +7,7 @@ using namespace std;
 int port, party;
 const int threads = 1;
 
-void test_auth_bit_input(OSTriple<BoolIO<NetIO>> *os, BoolIO<NetIO> *io) {
+void test_auth_bit_input(OSTriple *os, BoolIO *io) {
   PRG prg;
   int len = 1024;
   block *auth = new block[len];
@@ -26,8 +26,8 @@ void test_auth_bit_input(OSTriple<BoolIO<NetIO>> *os, BoolIO<NetIO> *io) {
   io->flush();
 }
 
-void test_compute_and_gate_check(OSTriple<BoolIO<NetIO>> *os,
-                                 BoolIO<NetIO> *io) {
+void test_compute_and_gate_check(OSTriple *os,
+                                 BoolIO *io) {
   PRG prg;
   int len = 1024;
   block *a = new block[3 * len];
@@ -52,9 +52,9 @@ void test_compute_and_gate_check(OSTriple<BoolIO<NetIO>> *os,
   delete[] ain;
   io->flush();
 }
-void test_ostriple(BoolIO<NetIO> *ios[threads + 1], int party) {
+void test_ostriple(BoolIO *ios[threads + 1], int party) {
   auto t1 = clock_start();
-  OSTriple<BoolIO<NetIO>> os(party, threads, ios);
+  OSTriple os(party, threads, ios);
   cout << party << "\tconstructor\t" << time_from(t1) << " us" << endl;
 
   test_auth_bit_input(&os, ios[0]);
@@ -65,9 +65,9 @@ void test_ostriple(BoolIO<NetIO> *ios[threads + 1], int party) {
 
 int main(int argc, char **argv) {
   parse_party_and_port(argv, &party, &port);
-  BoolIO<NetIO> *ios[threads];
+  BoolIO *ios[threads];
   for (int i = 0; i < threads; ++i)
-    ios[i] = new BoolIO<NetIO>(
+    ios[i] = new BoolIO(
         new NetIO(party == ALICE ? nullptr : "127.0.0.1", port + i),
         party == ALICE);
 
@@ -78,7 +78,7 @@ int main(int argc, char **argv) {
 
   test_ostriple(ios, party);
   for (int i = 0; i < threads; ++i) {
-    NetIO *raw = ios[i]->io;
+    NetIO *raw = static_cast<NetIO *>(ios[i]->io);
     delete ios[i];
     delete raw;
   }

@@ -8,7 +8,7 @@ int main(int argc, char **argv) {
   int party, port;
   parse_party_and_port(argv, &party, &port);
   NetIO *netio = new NetIO(party == ALICE ? nullptr : "127.0.0.1", port, false);
-  BoolIO<NetIO> *io = new BoolIO<NetIO>(netio, party == ALICE);
+  BoolIO *io = new BoolIO(netio, party == ALICE);
   bool *data = new bool[LL];
   bool *data2 = new bool[LL];
 

@@ -8,19 +8,19 @@ using namespace std;
 int port, party;
 const int threads = 1;
 
-void test_mix_circuit(BoolIO<NetIO> *ios[threads], int party, int sz) {
+void test_mix_circuit(BoolIO *ios[threads], int party, int sz) {
   srand(time(NULL));
   uint64_t *a = new uint64_t[sz];
   for (int i = 0; i < sz; ++i)
     a[i] = rand() % PR;
 
-  setup_zk_bool<BoolIO<NetIO>>(ios, threads, party);
-  setup_zk_arith<BoolIO<NetIO>>(ios, threads, party, true);
+  setup_zk_bool(ios, threads, party);
+  setup_zk_arith<BoolIO>(ios, threads, party, true);
 
   IntFp *x = new IntFp[sz];
   batch_feed(x, a, sz);
 
-  sync_zk_bool<BoolIO<NetIO>>();
+  sync_zk_bool();
 
   Integer *y = new Integer[sz];
   for (int i = 0; i < sz; ++i)
@@ -28,7 +28,7 @@ void test_mix_circuit(BoolIO<NetIO> *ios[threads], int party, int sz) {
 
   Integer PR_bl = Integer(62, PR, PUBLIC);
 
-  sync_zk_bool<BoolIO<NetIO>>();
+  sync_zk_bool();
 
   auto start = clock_start();
   for (int k = 0; k < 2; ++k) {
@@ -41,7 +41,7 @@ void test_mix_circuit(BoolIO<NetIO> *ios[threads], int party, int sz) {
         if (a[j + 2] > PR)
           a[j + 2] -= PR;
       }
-      bool2arith<BoolIO<NetIO>>(x, y, sz);
+      bool2arith<BoolIO>(x, y, sz);
 
       for (int j = i; j < sz - 3; j += 3) {
         x[j] = x[j + 1] + x[j + 2];
@@ -49,7 +49,7 @@ void test_mix_circuit(BoolIO<NetIO> *ios[threads], int party, int sz) {
         if (a[j] > PR)
           a[j] -= PR;
       }
-      arith2bool<BoolIO<NetIO>>(y, x, sz);
+      arith2bool<BoolIO>(y, x, sz);
     }
   }
 
@@ -66,8 +66,8 @@ void test_mix_circuit(BoolIO<NetIO> *ios[threads], int party, int sz) {
   batch_reveal_check(x, a, sz);
   std::cout << "end check arithmetic" << std::endl;
 
-  finalize_zk_bool<BoolIO<NetIO>>();
-  finalize_zk_arith<BoolIO<NetIO>>();
+  finalize_zk_bool();
+  finalize_zk_arith<BoolIO>();
 
   double tt = time_from(start);
   std::cout << "conversion: " << tt / (2 * 3 * 2) / sz << std::endl;
@@ -79,9 +79,9 @@ void test_mix_circuit(BoolIO<NetIO> *ios[threads], int party, int sz) {
 
 int main(int argc, char **argv) {
   parse_party_and_port(argv, &party, &port);
-  BoolIO<NetIO> *ios[threads];
+  BoolIO *ios[threads];
   for (int i = 0; i < threads; ++i)
-    ios[i] = new BoolIO<NetIO>(
+    ios[i] = new BoolIO(
         new NetIO(party == ALICE ? nullptr : "127.0.0.1", port + i),
         party == ALICE);
 
@@ -105,7 +105,7 @@ int main(int argc, char **argv) {
   test_mix_circuit(ios, party, num);
 
   for (int i = 0; i < threads; ++i) {
-    NetIO *raw = ios[i]->io;
+    NetIO *raw = static_cast<NetIO *>(ios[i]->io);
     delete ios[i];
     delete raw;
   }

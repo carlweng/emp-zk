@@ -34,7 +34,7 @@ void merkle_tree(Bit *dig, int node_index, int current_level, int depth,
   cf->compute(dig, msg, (const Bit *)nullptr);
 }
 
-void test_merkle_tree_dfs(BoolIO<NetIO> *ios[threads], int party, int depth) {
+void test_merkle_tree_dfs(BoolIO *ios[threads], int party, int depth) {
   std::cout << "merkle tree of depth: " << depth << std::endl;
   string file = circuit_file_location + "sha-256.txt";
   BristolFormat cf(file.c_str());
@@ -43,7 +43,7 @@ void test_merkle_tree_dfs(BoolIO<NetIO> *ios[threads], int party, int depth) {
   std::cout << "number of nodes: " << (2 * width - 1) << std::endl;
 
   auto start = clock_start();
-  setup_zk_bool<BoolIO<NetIO>>(ios, threads, party);
+  setup_zk_bool(ios, threads, party);
 
   bool *witness = new bool[width];
   PRG prg;
@@ -53,7 +53,7 @@ void test_merkle_tree_dfs(BoolIO<NetIO> *ios[threads], int party, int depth) {
   merkle_tree(dig_cipher_bit, 0, 0, depth, witness, &cf);
   Bit res = Bit(true, PUBLIC);
   bool ret = res.reveal<bool>(PUBLIC);
-  finalize_zk_bool<BoolIO<NetIO>>();
+  finalize_zk_bool();
   std::cout << depth << " " << time_from(start) << " us " << party << " " << ret
             << "\n";
 
@@ -78,7 +78,7 @@ void test_merkle_tree_dfs(BoolIO<NetIO> *ios[threads], int party, int depth) {
 #endif
 }
 
-void test_merkle_tree(BoolIO<NetIO> *ios[threads], int party, int depth) {
+void test_merkle_tree(BoolIO *ios[threads], int party, int depth) {
   std::cout << "merkle tree of depth: " << depth << std::endl;
   string file = circuit_file_location + "sha-256.txt";
   int input_n, output_n;
@@ -90,7 +90,7 @@ void test_merkle_tree(BoolIO<NetIO> *ios[threads], int party, int depth) {
   std::cout << "number of nodes: " << (2 * width - 1) << std::endl;
 
   auto start = clock_start();
-  setup_zk_bool<BoolIO<NetIO>>(ios, threads, party);
+  setup_zk_bool(ios, threads, party);
 
   Bit *msg_cipher_bit = new Bit[input_n];
   Bit *dig_cipher_bit = new Bit[output_n * (2 * width - 1)];
@@ -123,7 +123,7 @@ void test_merkle_tree(BoolIO<NetIO> *ios[threads], int party, int depth) {
 
   Bit res = Bit(false, PUBLIC);
   bool ret = res.reveal<bool>(PUBLIC);
-  bool cheated = finalize_zk_bool<BoolIO<NetIO>>();
+  bool cheated = finalize_zk_bool();
   if (cheated)
     error("cheated\n");
   std::cout << depth << " " << time_from(start) << " ms " << party << " " << ret
@@ -153,9 +153,9 @@ void test_merkle_tree(BoolIO<NetIO> *ios[threads], int party, int depth) {
 
 int main(int argc, char **argv) {
   parse_party_and_port(argv, &party, &port);
-  BoolIO<NetIO> *ios[threads];
+  BoolIO *ios[threads];
   for (int i = 0; i < threads; ++i)
-    ios[i] = new BoolIO<NetIO>(
+    ios[i] = new BoolIO(
         new NetIO(party == ALICE ? nullptr : "127.0.0.1", port + i),
         party == ALICE);
 
@@ -181,7 +181,7 @@ int main(int argc, char **argv) {
   // test_merkle_tree(ios, party, depth);
 
   for (int i = 0; i < threads; ++i) {
-    NetIO *raw = ios[i]->io;
+    NetIO *raw = static_cast<NetIO *>(ios[i]->io);
     delete ios[i];
     delete raw;
   }

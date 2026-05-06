@@ -7,12 +7,12 @@ using namespace std;
 int port, party;
 const int threads = 1;
 
-void test_circuit_zk(BoolIO<NetIO> *ios[threads + 1], int party,
+void test_circuit_zk(BoolIO *ios[threads + 1], int party,
                      int input_sz_lg) {
 
   long long test_n = 1 << input_sz_lg;
   auto start = clock_start();
-  setup_zk_arith<BoolIO<NetIO>>(ios, threads, party);
+  setup_zk_arith<BoolIO>(ios, threads, party);
   auto timesetup = time_from(start);
   cout << "time for setup: " << timesetup * 1000 << " " << party << " " << endl;
 
@@ -46,14 +46,14 @@ void test_circuit_zk(BoolIO<NetIO> *ios[threads + 1], int party,
        << endl;
   std::cout << std::endl;
 
-  finalize_zk_arith<BoolIO<NetIO>>();
+  finalize_zk_arith<BoolIO>();
 }
 
 int main(int argc, char **argv) {
   parse_party_and_port(argv, &party, &port);
-  BoolIO<NetIO> *ios[threads + 1];
+  BoolIO *ios[threads + 1];
   for (int i = 0; i < threads + 1; ++i)
-    ios[i] = new BoolIO<NetIO>(
+    ios[i] = new BoolIO(
         new NetIO(party == ALICE ? nullptr : "127.0.0.1", port + i),
         party == ALICE);
 
@@ -76,7 +76,7 @@ int main(int argc, char **argv) {
   test_circuit_zk(ios, party, num);
 
   for (int i = 0; i < threads + 1; ++i) {
-    NetIO *raw = ios[i]->io;
+    NetIO *raw = static_cast<NetIO *>(ios[i]->io);
     delete ios[i];
     delete raw;
   }

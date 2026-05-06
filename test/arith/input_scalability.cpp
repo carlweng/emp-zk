@@ -7,7 +7,7 @@ using namespace std;
 int port, party;
 const int threads = 1;
 
-void test_input_speed(BoolIO<NetIO> **ios, int party, int input_sz_log) {
+void test_input_speed(BoolIO **ios, int party, int input_sz_log) {
   long long sz = input_sz_log;
   std::cout << "input size: " << sz << std::endl;
   srand(time(NULL));
@@ -15,7 +15,7 @@ void test_input_speed(BoolIO<NetIO> **ios, int party, int input_sz_log) {
   for (int i = 0; i < sz; ++i)
     a[i] = rand() % PR;
 
-  setup_zk_arith<BoolIO<NetIO>>(ios, threads, party);
+  setup_zk_arith<BoolIO>(ios, threads, party);
 
   IntFp *x = new IntFp[sz];
 
@@ -34,18 +34,18 @@ void test_input_speed(BoolIO<NetIO> **ios, int party, int input_sz_log) {
   std::cout << "batch input average time: " << tt * 1000 / sz
             << " ns per element" << std::endl;
 
-  finalize_zk_arith<BoolIO<NetIO>>();
+  finalize_zk_arith<BoolIO>();
 
   delete[] a;
   delete[] x;
 }
 
-/*void test_circuit_zk(BoolIO<NetIO> *ios[threads+1], int party) {
+/*void test_circuit_zk(BoolIO *ios[threads+1], int party) {
 
         long long input_sz = 1048576;
         while(input_sz < 1000000000LL) {
                 auto start = clock_start();
-                setup_fp_zk<BoolIO<NetIO>, threads>(ios, party);
+                setup_fp_zk<BoolIO, threads>(ios, party);
                 IntFp *a = new IntFp[input_sz];
                 for(int i = 0; i < input_sz; ++i)
                         a[i] = IntFp((uint64_t)i, ALICE);
@@ -59,7 +59,7 @@ void test_input_speed(BoolIO<NetIO> **ios, int party, int input_sz_log) {
         input_sz = unit * 2;
         while(input_sz < 1100000000LL) {
                 auto start = clock_start();
-                setup_fp_zk<BoolIO<NetIO>, threads>(ios, party);
+                setup_fp_zk<BoolIO, threads>(ios, party);
                 int round = input_sz / unit;
                 IntFp **a = (IntFp**)malloc(round*sizeof(IntFp*));
                 for(int i = 0; i < round; ++i) {
@@ -78,9 +78,9 @@ void test_input_speed(BoolIO<NetIO> **ios, int party, int input_sz_log) {
 
 int main(int argc, char **argv) {
   parse_party_and_port(argv, &party, &port);
-  BoolIO<NetIO> *ios[threads + 1];
+  BoolIO *ios[threads + 1];
   for (int i = 0; i < threads + 1; ++i)
-    ios[i] = new BoolIO<NetIO>(
+    ios[i] = new BoolIO(
         new NetIO(party == ALICE ? nullptr : "127.0.0.1", port + i),
         party == ALICE);
 
@@ -103,7 +103,7 @@ int main(int argc, char **argv) {
   test_input_speed(ios, party, num);
 
   for (int i = 0; i < threads + 1; ++i) {
-    NetIO *raw = ios[i]->io;
+    NetIO *raw = static_cast<NetIO *>(ios[i]->io);
     delete ios[i];
     delete raw;
   }

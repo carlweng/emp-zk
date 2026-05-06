@@ -128,8 +128,9 @@ int main(int argc, char **argv) {
   //	test_sis_proof(ios, party, 256, 256*61);
 
   for (int i = 0; i < threads + 1; ++i) {
-    delete ios[i]->io;
+    NetIO *raw = ios[i]->io;
     delete ios[i];
+    delete raw;
   }
   return 0;
 }

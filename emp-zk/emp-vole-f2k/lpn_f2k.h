@@ -2,6 +2,7 @@
 #define _LPN_F2K_H__
 
 #include "emp-tool/emp-tool.h"
+#include <algorithm>
 namespace emp {
 template <int d = 10> class LpnF2k {
 public:
@@ -98,11 +99,11 @@ public:
     int width = n / (threads + 1);
     for (int i = 0; i < threads; ++i) {
       int start = i * width;
-      int end = min((i + 1) * width, n);
+      int end = std::min((i + 1) * width, n);
       fut.push_back(pool->enqueue([this, start, end]() { task(start, end); }));
     }
     int start = threads * width;
-    int end = min((threads + 1) * width, n);
+    int end = std::min((threads + 1) * width, n);
     task(start, end);
 
     for (auto &f : fut)

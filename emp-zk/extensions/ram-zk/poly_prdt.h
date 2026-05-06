@@ -15,10 +15,10 @@ public:
   block *buffer2 = nullptr;
   block *buffer3 = nullptr;
   block *buffer4 = nullptr;
-  FerretCOT<IO> *ferret = nullptr;
+  FerretCOT *ferret = nullptr;
   int num;
 
-  F2kPolyPrdt(int party, IO *io, FerretCOT<IO> *ferret)
+  F2kPolyPrdt(int party, IO *io, FerretCOT *ferret)
       : party(party), io(io), ferret(ferret) {
     if (party == ALICE) {
       buffer0 = new block[buffer_sz];

@@ -3,7 +3,10 @@
 #include "emp-tool/emp-tool.h"
 
 namespace emp {
-template <typename IO> class BoolIO : public IOChannel<BoolIO<IO>> {
+// IOChannel went from CRTP-templated to a polymorphic virtual base in
+// emp-tool main; counter is now public on the base, so the
+// previously-needed `using IOChannel<...>::counter` is gone.
+template <typename IO> class BoolIO : public IOChannel {
 public:
   IO *io;
   Hash hash; // modelled as RO
@@ -11,7 +14,6 @@ public:
   int ptr;
   bool sender;
   vector<unsigned char> tmp_arr;
-  using IOChannel<BoolIO<IO>>::counter;
   BoolIO(IO *io, int sender) : io(io), sender(sender) {
     buf = new bool[NETWORK_BUFFER_SIZE2];
     if (sender)
@@ -61,16 +63,16 @@ public:
     return res;
   }
 
-  void send_data_internal(const void *data, int len) {
+  void send_data_internal(const void *data, size_t nbyte) override {
     if (ptr != 0)
       flush();
-    io->send_data(data, len);
+    io->send_data(data, nbyte);
   }
 
-  void recv_data_internal(void *data, int len) {
+  void recv_data_internal(void *data, size_t nbyte) override {
     if (ptr != NETWORK_BUFFER_SIZE2)
       flush();
-    io->recv_data(data, len);
+    io->recv_data(data, nbyte);
   }
 
   void send_bool_raw(const bool *data, int length) {

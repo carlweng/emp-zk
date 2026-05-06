@@ -211,7 +211,7 @@ private:
     key = new Bit[keysize];
     key_loc = new bool[keysize];
     memcpy(key_loc, key_b, keysize * sizeof(bool));
-    ProtocolExecution::prot_exec->feed((block *)key, ALICE, key_loc, keysize);
+    emp::backend->feed((void *)(block *)key, ALICE, key_loc, keysize);
 
     // LinMatrices: r * n * n
     // random_bit_vec_gen(LinMatrices, LinMatrices_loc,
@@ -230,7 +230,7 @@ private:
     roundconstants = new Bit[len];
     roundconstants_loc = new bool[len];
     prg.random_bool(roundconstants_loc, len);
-    ProtocolExecution::prot_exec->feed((block *)roundconstants, PUBLIC,
+    emp::backend->feed((void *)(block *)roundconstants, PUBLIC,
                                        roundconstants_loc, len);
 
     // keyMatrices: r * n * k
@@ -252,7 +252,7 @@ private:
     out_loc = new bool[len];
     out = new Bit[len];
     prg.random_bool(out_loc, len);
-    ProtocolExecution::prot_exec->feed((block *)out, PUBLIC, out_loc, len);
+    emp::backend->feed((void *)(block *)out, PUBLIC, out_loc, len);
   }
 };
 

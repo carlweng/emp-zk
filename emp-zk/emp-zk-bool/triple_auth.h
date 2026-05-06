@@ -3,6 +3,8 @@
 
 #include "emp-tool/emp-tool.h"
 
+using namespace emp;
+
 template <typename IO> class TripleAuth {
 public:
   int party;

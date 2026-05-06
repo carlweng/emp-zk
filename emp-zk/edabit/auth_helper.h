@@ -3,6 +3,9 @@
 
 #include "emp-tool/emp-tool.h"
 
+using namespace emp;
+using Integer = SignedInt;
+
 template <typename IO> class DoubAuthHelper {
 public:
   int party;

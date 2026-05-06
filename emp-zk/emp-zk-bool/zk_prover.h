@@ -7,6 +7,8 @@
 #include <emp-tool/emp-tool.h>
 #include <iostream>
 
+using namespace emp;
+
 template <typename IO> class ZKBoolCircExecPrv : public ZKBoolCircExec<IO> {
 public:
   using ZKBoolCircExec<IO>::pub_label;
@@ -25,14 +27,16 @@ public:
   }
 };
 
-template <typename IO> class ZKProver : public ProtocolExecution {
+// Free-standing helper since v1.0; the v0.3.x ProtocolExecution base is
+// gone. ZKBoolBackendPrv (zk_bool_backend.h) forwards Backend::feed /
+// Backend::reveal to ZKProver::feed / ZKProver::reveal.
+template <typename IO> class ZKProver {
 public:
   IO *io = nullptr;
   OSTriple<IO> *ostriple = nullptr;
   PolyProof<IO> *polyproof = nullptr;
   ZKBoolCircExecPrv<IO> *gen = nullptr;
-  ZKProver(IO **ios, int threads, ZKBoolCircExecPrv<IO> *t, void *state)
-      : ProtocolExecution(ALICE) {
+  ZKProver(IO **ios, int threads, ZKBoolCircExecPrv<IO> *t, void *state) {
     this->io = ios[0];
     this->gen = t;
     ostriple = new OSTriple<IO>(ALICE, threads, ios, state);

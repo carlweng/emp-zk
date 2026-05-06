@@ -1,5 +1,7 @@
 #ifndef RO_ZK_RAM_H__
 #define RO_ZK_RAM_H__
+#include "emp-zk/emp-zk-bool/zk_bool_backend.h"
+#include "emp-zk/extensions/ram-zk/gf_base.h"
 #include "emp-zk/extensions/ram-zk/ostriple.h"
 
 template <typename IO> class ROZKRAM {
@@ -17,8 +19,7 @@ public:
   F2kOSTriple<IO> *ostriple = nullptr;
   ROZKRAM(int _party, int index_sz, int val_sz)
       : party(_party), index_sz(index_sz), val_sz(val_sz) {
-    ZKBoolCircExec<IO> *exec =
-        (ZKBoolCircExec<IO> *)(CircuitExecution::circ_exec);
+    ZKBoolCircExec<IO> *exec = emp::get_bool_circ<IO>();
     io = exec->ostriple->io;
     Delta = exec->ostriple->delta;
     ostriple =
@@ -63,9 +64,10 @@ public:
 
   void pack(block &mac, const Integer &index, const Integer &val) {
     block res1, res2;
-    vector_inn_prdt_sum_red(&res1, (block *)(val.bits.data()), gp.base, val_sz);
+    vector_inn_prdt_sum_red(&res1, (block *)(val.bits.data()), ramzk_gf_base(),
+                            val_sz);
     vector_inn_prdt_sum_red(&res2, (block *)(index.bits.data()),
-                            gp.base + val_sz, index_sz);
+                            ramzk_gf_base() + val_sz, index_sz);
     mac = res1 ^ res2;
   }
 

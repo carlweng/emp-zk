@@ -105,8 +105,9 @@ int main(int argc, char **argv) {
   test_mix_circuit(ios, party, num);
 
   for (int i = 0; i < threads; ++i) {
-    delete ios[i]->io;
+    NetIO *raw = ios[i]->io;
     delete ios[i];
+    delete raw;
   }
   return 0;
 }

@@ -29,7 +29,7 @@ void test_lowmc(BoolIO<NetIO> *ios[threads], int party) {
   // cout<<"key:";for(int i = 0; i < keysize; ++i)cout<<key_b[i];cout<<endl;
   prg.random_bool(ptx_b, test_sz);
   // cout<<"ptx:";for(int i = 0; i < test_sz; ++i)cout<<ptx_b[i];cout<<endl;
-  ProtocolExecution::prot_exec->feed((block *)ptx, ALICE, ptx_b, test_sz);
+  backend->feed((block *)ptx, ALICE, ptx_b, test_sz);
 
   ZKLowMC *lowmc = new ZKLowMC(key_b);
 
@@ -40,7 +40,7 @@ void test_lowmc(BoolIO<NetIO> *ios[threads], int party) {
   lowmc->encrypt(ctx, ptx, nblocks);
   double tt = time_from(start);
 
-  ProtocolExecution::prot_exec->reveal(ctx_rev, PUBLIC, (block *)ctx, test_sz);
+  backend->reveal(ctx_rev, PUBLIC, (block *)ctx, test_sz);
 
   bool cheated = finalize_zk_bool<BoolIO<NetIO>>();
   if (cheated)
@@ -77,8 +77,9 @@ int main(int argc, char **argv) {
   test_lowmc(ios, party);
 
   for (int i = 0; i < threads; ++i) {
-    delete ios[i]->io;
+    NetIO *raw = ios[i]->io;
     delete ios[i];
+    delete raw;
   }
   return 0;
 }

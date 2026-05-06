@@ -1,5 +1,6 @@
 #ifndef _VOLE_TRIPLE_H_
 #define _VOLE_TRIPLE_H_
+#include "emp-zk/emp-vole/base_cot.h"
 #include "emp-zk/emp-vole/base_svole.h"
 #include "emp-zk/emp-vole/lpn.h"
 #include "emp-zk/emp-vole/mpfss_reg.h"

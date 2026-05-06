@@ -1,66 +1,117 @@
-# EMP-zk  
-![arm](https://github.com/emp-toolkit/emp-zk/workflows/arm/badge.svg)
-![x86](https://github.com/emp-toolkit/emp-zk/workflows/x86/badge.svg)
-[![Total alerts](https://img.shields.io/lgtm/alerts/g/emp-toolkit/emp-zk.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/emp-toolkit/emp-zk/alerts/)
-[![Language grade: C/C++](https://img.shields.io/lgtm/grade/cpp/g/emp-toolkit/emp-zk.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/emp-toolkit/emp-zk/context:cpp)
+# EMP-zk
+![build](https://github.com/emp-toolkit/emp-zk/workflows/build/badge.svg)
+[![CodeQL](https://github.com/emp-toolkit/emp-zk/actions/workflows/codeql.yml/badge.svg)](https://github.com/emp-toolkit/emp-zk/actions/workflows/codeql.yml)
 
-<img src="https://raw.githubusercontent.com/emp-toolkit/emp-readme/master/art/logo-full.jpg" width=300px/>
+<img src="https://raw.githubusercontent.com/emp-toolkit/emp-readme/main/art/logo-full.jpg" width=300px/>
+
+> **Which version do I want?**
+>
+> - **Existing projects pinned to a published release: stay on `v0.3.x`** —
+>   `python3 install.py --tool=v0.3.x --ot=v0.3.x --zk=v0.3.x`
+>   reproduces the prior emp-zk line. Bug fixes will be backported.
+> - **New projects, or willing to migrate: track `main`** — built against
+>   the unified `Backend* backend` line of emp-tool / emp-ot v1.0.
+>   `emp-zk-bool` plugs into the new global `Backend` via a
+>   composition-style wrapper; `emp-zk-arith` keeps its own
+>   `ZKFpExec::zk_exec` singleton. `BaseCot` and `TwoKeyPRP` (which
+>   moved out of emp-ot main) are vendored locally under
+>   `emp-zk/emp-vole/`, and the `GaloisFieldPacking::base[]` array
+>   that ram-zk indexes is provided by a small `ramzk_gf_base()`
+>   helper. The full `emp-zk` umbrella (bool / arith / vole / ram /
+>   floats / lowmc) builds and tests pass end-to-end.
 
 Protocols
 =====
 The code in this repo implements a fast, scalable, communication-efficient zero-knowledge proof protocol for Boolean/arithmetic circuits and polynomials. The protocols are described in [Wolverine](https://eprint.iacr.org/2020/925), [Quicksilver](https://eprint.iacr.org/2021/076) and [Mystique](https://eprint.iacr.org/2021/730).
 
-Installation
-=====
-1. `wget https://raw.githubusercontent.com/emp-toolkit/emp-readme/master/scripts/install.py`
-2. `python[3] install.py --deps --tool --ot --zk`
-    1. By default it will build for Release. `-DCMAKE_BUILD_TYPE=[Release|Debug]` option is also available.
-    2. No sudo? Change [`CMAKE_INSTALL_PREFIX`](https://cmake.org/cmake/help/v2.8.8/cmake.html#variable%3aCMAKE_INSTALL_PREFIX).
+## Requirements
 
-Test
-=====
+- CMake ≥ 3.21
+- A C++17 compiler
+- OpenSSL (≥ 1.1)
+- emp-tool / emp-ot at the matching release line
 
-Testing on localhost
------
+## Build and install
 
-   `./run ./bin/[binary]`
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+sudo cmake --install build      # respects CMAKE_INSTALL_PREFIX
+```
 
-   
-Testing on two
------
+If emp-tool / emp-ot are in sibling source trees rather than installed,
+point CMake at their build directories:
 
-1. Change the IP address in the test code 
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+    -Demp-tool_DIR=/path/to/emp-tool/build \
+    -Demp-ot_DIR=/path/to/emp-ot/build
+cmake --build build -j
+```
 
-2. run `./bin/[binary] 1 [port]` on one machine and 
-  
-   run `./bin/[binary] 2 [port]` on the other machine.
+## Consuming from another CMake project
 
- 
-Performance
-=====
+After `cmake --install build`:
+
+```cmake
+find_package(emp-zk 1.0 REQUIRED)
+target_link_libraries(my-app PRIVATE emp-zk::emp-zk)
+```
+
+The `emp-zk::emp-zk` target transitively pulls in `emp-ot::emp-ot` and
+`emp-tool::emp-tool`.
+
+## Test
+
+```bash
+ctest --test-dir build --output-on-failure
+```
+
+Tests under `test/bool/`, `test/arith/`, `test/vole/`, and `test/ram/`
+exercise every module end-to-end: Boolean / arithmetic ZK,
+polynomial / inner-product proofs, SHA-256 + LowMC circuits, edabit
+bool↔arith conversion, VOLE bootstrap (cope / lpn / base_svole /
+vole_triple / vole_f2k_triple), and RAM ZK (read-only, read-write,
+extended). Two-party tests are driven by the top-level `./run`
+wrapper (spawns party 1 then party 2 on localhost).
+
+For a two-machine run: `./bin/test_bool_<name> 1 <port>` on host A and
+`./bin/test_bool_<name> 2 <port>` on host B; edit the test source if
+the IP needs to be other than `127.0.0.1`.
+
+## Performance
+
 The test is done by two AWS EC2 m5.2xlarge servers with throttled network.
 
-Throughput of circuit-based ZK protocol
------
-All values are for "million gates per second".
-##### Boolean circuits
+### Throughput of circuit-based ZK protocol
+
+All values are "million gates per second".
+
+#### Boolean circuits
+
 |Threads|10 Mbps|20 Mbps|30 Mbps|50 Mbps|Localhost|
 |-------|-------|-------|-------|-------|---------|
 |1|5.1|7.8|8.6|8.6|8.6|
 |2|6|10|12.9|14.3|13.6|
 |3|6.3|10.9|14.5|17.3|18|
 |4|6.4|11.4|15.1|19|19.4|
-##### Arithmetic circuits
+
+#### Arithmetic circuits
+
 |Threads|100 Mbps|500 Mbps|1 Gbps|2 Gbps|Localhost|
 |-------|-------|-------|-------|-------|---------|
 |1|1.4|4.8|6.8|7.8|7.8|
 |2|1.4|5.6|8.7|10.2|10.4|
 |3|1.4|5.9|9.3|11.7|12.5|
 
+(Numbers measured on the v0.3.x line. The `main` migration is
+behaviorally a port — re-measured numbers should be in the same
+ballpark.)
 
-Question
-=====
-Please send email to Chenkai Weng (ckweng@u.northwestern.edu) and Xiao Wang (wangxiao1254@gmail.com).
+## [Acknowledgement, Reference, and Questions](https://github.com/emp-toolkit/emp-readme/blob/main/README.md#citation)
 
-## Acknowledgement
-This software is produced by wizkit team members in the SIEVE project. This work was supported in part DARPA under Contract No. HR001120C0087, and research awards from Facebook and PlatON Network. Any opinions, findings and conclusions or recommendations expressed in this material are those of the author(s) and do not necessarily reflect the views of DARPA.
+Please send email to Xiao Wang (wangxiao1254@gmail.com).
+
+## License
+
+Licensed under the Apache License, Version 2.0 — see [LICENSE](LICENSE).

@@ -1,5 +1,6 @@
 #ifndef SPFSS_SENDER_F2K_H__
 #define SPFSS_SENDER_F2K_H__
+#include "emp-zk/emp-vole/twokeyprp.h"
 #include <emp-ot/emp-ot.h>
 #include <emp-tool/emp-tool.h>
 

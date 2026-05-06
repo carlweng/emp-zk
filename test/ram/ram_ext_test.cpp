@@ -67,8 +67,9 @@ int main(int argc, char **argv) {
   // bench(ios, party);
 
   for (int i = 0; i < threads; ++i) {
-    delete ios[i]->io;
+    NetIO *raw = ios[i]->io;
     delete ios[i];
+    delete raw;
   }
   return 0;
 }

@@ -6,6 +6,8 @@
 #include <emp-ot/emp-ot.h>
 #include <emp-tool/emp-tool.h>
 
+using namespace emp;
+
 template <typename IO> class ZKBoolCircExecVer : public ZKBoolCircExec<IO> {
 public:
   block delta, zdelta;
@@ -36,14 +38,16 @@ public:
   block not_gate(const block &a) override { return a ^ zdelta; }
 };
 
-template <typename IO> class ZKVerifier : public ProtocolExecution {
+// Free-standing helper since v1.0; the v0.3.x ProtocolExecution base is
+// gone. ZKBoolBackendVer (zk_bool_backend.h) forwards Backend::feed /
+// Backend::reveal to ZKVerifier::feed / ZKVerifier::reveal.
+template <typename IO> class ZKVerifier {
 public:
   IO *io = nullptr;
   OSTriple<IO> *ostriple = nullptr;
   PolyProof<IO> *polyproof = nullptr;
   ZKBoolCircExecVer<IO> *eva = nullptr;
-  ZKVerifier(IO **ios, int threads, ZKBoolCircExecVer<IO> *t, void *state)
-      : ProtocolExecution(BOB) {
+  ZKVerifier(IO **ios, int threads, ZKBoolCircExecVer<IO> *t, void *state) {
     this->io = ios[0];
     ostriple = new OSTriple<IO>(BOB, threads, ios, state);
     polyproof = new PolyProof<IO>(BOB, ios[0], ostriple->ferret);

@@ -97,8 +97,7 @@ public:
       for (uint32_t i = 0; i < ell; ++i)
         bool_candidate[i] = Integer(62, 0, ALICE);
     }
-    ((ZKBoolCircExecPrv<IO> *)CircuitExecution::circ_exec)
-        ->ostriple->io->flush();
+    get_bool_circ_prv<IO>()->ostriple->io->flush();
 
     // Generate a random point to do the permutation
     rand_pt = random_point(ell_faulty);
@@ -131,8 +130,7 @@ public:
         // TODO boolean addition and selection costs a lot, and it should be
         // subtraction
       }
-      ((ZKBoolCircExecPrv<IO> *)CircuitExecution::circ_exec)
-          ->ostriple->io->flush();
+      emp::get_bool_circ_prv<IO>()->ostriple->io->flush();
       if (party == ALICE)
         auth_helper->open_check_send(f2_to_check, fp_to_check, N);
       else

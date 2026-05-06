@@ -1,21 +1,107 @@
-cmake_minimum_required (VERSION 3.0...4.1.2)
-project (emp-zk)
-set(NAME "emp-zk")
+cmake_minimum_required(VERSION 3.21)
+project(emp-zk VERSION 1.0.0 LANGUAGES CXX)
 
-find_path(CMAKE_FOLDER NAMES cmake/emp-tool-config.cmake)
-include(${CMAKE_FOLDER}/cmake/emp-base.cmake)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
+    message(FATAL_ERROR
+        "In-source builds are not allowed. Use a separate build directory:\n"
+        "  cmake -B build && cmake --build build")
+endif()
 
-find_package(emp-ot REQUIRED)
-include_directories(${EMP-OT_INCLUDE_DIRS})
-set(sources
-  emp-zk/emp-zk-bool/emp-zk-bool.cpp
-  emp-zk/emp-zk-arith/emp-zk-arith.cpp
-)
-add_library(${NAME} SHARED ${sources})
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
+        Debug Release RelWithDebInfo MinSizeRel)
+endif()
 
-install(DIRECTORY emp-zk DESTINATION include/)
-install(FILES cmake/emp-zk-config.cmake DESTINATION cmake/)
-install(TARGETS ${NAME} DESTINATION lib)
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
-ENABLE_TESTING()
-ADD_SUBDIRECTORY(test)
+# ---------------------------------------------------------------------
+# Options
+# ---------------------------------------------------------------------
+option(EMP_ZK_BUILD_TESTS "Build emp-zk tests"            ${PROJECT_IS_TOP_LEVEL})
+option(EMP_ZK_INSTALL     "Generate install / export rules" ${PROJECT_IS_TOP_LEVEL})
+
+# ---------------------------------------------------------------------
+# Dependencies
+# ---------------------------------------------------------------------
+# Local-dev tip: point at sibling build trees with
+#   -Demp-tool_DIR=/path/to/emp-tool/build
+#   -Demp-ot_DIR=/path/to/emp-ot/build
+# emp-ot's package config already pulls in emp-tool::emp-tool transitively.
+find_package(emp-ot 1.0 REQUIRED)
+
+# ---------------------------------------------------------------------
+# Library target
+# ---------------------------------------------------------------------
+add_library(emp-zk STATIC
+    emp-zk/emp-zk-bool/emp-zk-bool.cpp
+    emp-zk/emp-zk-arith/emp-zk-arith.cpp)
+add_library(emp-zk::emp-zk ALIAS emp-zk)
+
+target_compile_features(emp-zk PUBLIC cxx_std_17)
+
+target_include_directories(emp-zk PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+
+target_link_libraries(emp-zk PUBLIC emp-ot::emp-ot)
+
+# Some bool tests load Bristol-format circuits from
+# emp-tool/circuits/files via macro_xstr(EMP_CIRCUIT_PATH). emp-tool
+# main no longer defines this; derive it from the imported emp-tool
+# include directory (mirrors emp-sh2pc's CMakeLists.txt).
+get_target_property(_emp_tool_inc emp-tool::emp-tool INTERFACE_INCLUDE_DIRECTORIES)
+list(GET _emp_tool_inc 0 _emp_tool_inc0)
+target_compile_definitions(emp-zk PUBLIC
+    EMP_CIRCUIT_PATH=${_emp_tool_inc0}/emp-tool/circuits/files/)
+
+# ---------------------------------------------------------------------
+# Install + export
+# ---------------------------------------------------------------------
+if(EMP_ZK_INSTALL)
+    set(_cmake_install_dir ${CMAKE_INSTALL_LIBDIR}/cmake/emp-zk)
+
+    install(TARGETS emp-zk EXPORT emp-zkTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+    install(DIRECTORY emp-zk
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        FILES_MATCHING
+            PATTERN "*.h")
+
+    install(EXPORT emp-zkTargets
+        NAMESPACE   emp-zk::
+        DESTINATION ${_cmake_install_dir}
+        FILE        emp-zkTargets.cmake)
+
+    configure_package_config_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/emp-zk-config.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/emp-zk-config.cmake
+        INSTALL_DESTINATION ${_cmake_install_dir})
+
+    write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/emp-zk-config-version.cmake
+        VERSION       ${PROJECT_VERSION}
+        COMPATIBILITY SameMajorVersion)
+
+    install(FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/emp-zk-config.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/emp-zk-config-version.cmake
+        DESTINATION ${_cmake_install_dir})
+endif()
+
+# Build-tree export so siblings can consume without `make install`.
+export(EXPORT emp-zkTargets
+       NAMESPACE emp-zk::
+       FILE      ${CMAKE_CURRENT_BINARY_DIR}/emp-zkTargets.cmake)
+
+# ---------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------
+if(EMP_ZK_BUILD_TESTS)
+    include(CTest)
+    add_subdirectory(test)
+endif()

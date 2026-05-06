@@ -32,7 +32,7 @@ int main(int argc, char **argv) {
     else
       cout << "fine!\n";
   }
-  delete netio;
   delete io;
+  delete netio;
   return 0;
 }

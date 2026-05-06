@@ -8,12 +8,13 @@
 #include "emp-zk/emp-zk-arith/zk_fp_exec.h"
 #include "emp-zk/emp-zk-arith/zk_fp_exec_prover.h"
 #include "emp-zk/emp-zk-arith/zk_fp_exec_verifier.h"
+#include "emp-zk/emp-zk-bool/zk_bool_backend.h"
 
 template <typename IO>
 inline void setup_zk_arith(IO **ios, int threads, int party,
                            bool enable_conversion = false) {
   if (enable_conversion) {
-    if (CircuitExecution::circ_exec == nullptr) {
+    if (emp::backend == nullptr) {
       error("Boolean ZK backend is not set up!\n");
     }
   }
@@ -38,7 +39,7 @@ inline void setup_zk_arith(IO **ios, int threads, int party,
           BOB, threads, ios,
           ((ZKFpExecVer<IO> *)(ZKFpExec::zk_exec))->ostriple->vole);
       EdaBits<IO>::conv->install_boolean(
-          ((ZKBoolCircExecVer<IO> *)CircuitExecution::circ_exec)->delta);
+          emp::get_bool_circ_ver<IO>()->delta);
     }
   }
 }

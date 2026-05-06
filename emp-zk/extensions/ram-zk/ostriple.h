@@ -22,14 +22,14 @@ public:
   IO *io;
   IO **ios;
   PRG prg;
-  FerretCOT<IO> *ferret = nullptr;
+  FerretCOT *ferret = nullptr;
   SVoleF2k<IO> *svole = nullptr;
   F2kPolyPrdt<IO> *polyprdt = nullptr;
   ThreadPool *pool = nullptr;
 
   int64_t BUFFER_MEM_SZ = -1, BUFFER_SZ = -1;
 
-  F2kOSTriple(int party, int threads, IO **ios, FerretCOT<IO> *ferret,
+  F2kOSTriple(int party, int threads, IO **ios, FerretCOT *ferret,
               ThreadPool *pool)
       : party(party), threads(threads), ios(ios), ferret(ferret), pool(pool) {
     if (party == BOB)
@@ -133,10 +133,15 @@ public:
     }
     lowInt = Integer(65, low, ALICE);
     highInt = Integer(65, high, ALICE);
-    vector_inn_prdt_sum_red(&m, (block *)(lowInt.bits.data()), pack.base, 64);
-    vector_inn_prdt_sum_red(&t0, (block *)(highInt.bits.data()), pack.base + 64,
-                            64);
-    m ^= t0;
+    {
+      // GaloisFieldPacking::base[i] = X^i is no longer exposed on
+      // emp-tool main; pack.packing(res, data) over 128 wires
+      // computes the same Σ data[i]·X^i directly.
+      block packbuf[128];
+      memcpy(packbuf,      lowInt.bits.data(),  64 * sizeof(block));
+      memcpy(packbuf + 64, highInt.bits.data(), 64 * sizeof(block));
+      pack.packing(&m, packbuf);
+    }
     polyprdt->polyPrdt3(vala, maca, valb, macb, valc, macc, m);
     val = v;
     mac = m;
@@ -157,10 +162,15 @@ public:
     }
     lowInt = Integer(65, low, ALICE);
     highInt = Integer(65, high, ALICE);
-    vector_inn_prdt_sum_red(&m, (block *)(lowInt.bits.data()), pack.base, 64);
-    vector_inn_prdt_sum_red(&t0, (block *)(highInt.bits.data()), pack.base + 64,
-                            64);
-    m ^= t0;
+    {
+      // GaloisFieldPacking::base[i] = X^i is no longer exposed on
+      // emp-tool main; pack.packing(res, data) over 128 wires
+      // computes the same Σ data[i]·X^i directly.
+      block packbuf[128];
+      memcpy(packbuf,      lowInt.bits.data(),  64 * sizeof(block));
+      memcpy(packbuf + 64, highInt.bits.data(), 64 * sizeof(block));
+      pack.packing(&m, packbuf);
+    }
     polyprdt->polyPrdt4(vala, maca, valb, macb, valc, macc, vald, macd, m);
     val = v;
     mac = m;
@@ -182,10 +192,15 @@ public:
     }
     lowInt = Integer(65, low, ALICE);
     highInt = Integer(65, high, ALICE);
-    vector_inn_prdt_sum_red(&m, (block *)(lowInt.bits.data()), pack.base, 64);
-    vector_inn_prdt_sum_red(&t0, (block *)(highInt.bits.data()), pack.base + 64,
-                            64);
-    m ^= t0;
+    {
+      // GaloisFieldPacking::base[i] = X^i is no longer exposed on
+      // emp-tool main; pack.packing(res, data) over 128 wires
+      // computes the same Σ data[i]·X^i directly.
+      block packbuf[128];
+      memcpy(packbuf,      lowInt.bits.data(),  64 * sizeof(block));
+      memcpy(packbuf + 64, highInt.bits.data(), 64 * sizeof(block));
+      pack.packing(&m, packbuf);
+    }
     polyprdt->polyPrdt5(vala, maca, valb, macb, valc, macc, vald, macd, vale,
                         mace, m);
     val = v;
@@ -227,7 +242,7 @@ public:
       f.get();
 
     block ope_data[128];
-    ferret->rcot(ope_data, 128);
+    ferret->rcot_send(ope_data, 128);
     if (party == ALICE) {
       uint64_t ch_bits[2];
       for (int i = 0; i < 2; ++i) {

@@ -3,6 +3,7 @@
 #include "emp-zk/emp-vole-f2k/base_svole.h"
 #include "emp-zk/emp-vole-f2k/lpn_f2k.h"
 #include "emp-zk/emp-vole-f2k/mpfss.h"
+#include "emp-zk/emp-vole/base_cot.h"
 
 namespace emp {
 
@@ -47,7 +48,7 @@ public:
   block *vole_yz = nullptr;
   block *vole_x = nullptr;
 
-  FerretCOT<IO> *ferret = nullptr;
+  FerretCOT *ferret = nullptr;
   BaseSVoleF2k<IO> *base_svole = nullptr;
   BaseCot<IO> *base_cot = nullptr; // TODO use ferret
   MpfssRegF2k<IO> *mpfss = nullptr;
@@ -57,7 +58,7 @@ public:
   LpnF2k<10> *lpn = nullptr;
   ThreadPool *pool = nullptr;
 
-  SVoleF2k(int party, int threads, IO **ios, FerretCOT<IO> *ferret,
+  SVoleF2k(int party, int threads, IO **ios, FerretCOT *ferret,
            PrimalLPNParameterF2128 param = f2k_b13) {
     this->io = ios[0];
     this->threads = threads;

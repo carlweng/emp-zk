@@ -31,7 +31,7 @@ void merkle_tree(Bit *dig, int node_index, int current_level, int depth,
     for (int i = 0; i < 512; ++i)
       msg[i] = Bit(witness + node_index * 512 + i, ALICE);
   }
-  cf->compute((block *)dig, (block *)msg, nullptr);
+  cf->compute(dig, msg, (const Bit *)nullptr);
 }
 
 void test_merkle_tree_dfs(BoolIO<NetIO> *ios[threads], int party, int depth) {
@@ -102,7 +102,7 @@ void test_merkle_tree(BoolIO<NetIO> *ios[threads], int party, int depth) {
   Bit *cipher_ptr = dig_cipher_bit;
   Bit *plain_ptr = cipher_ptr;
   for (int i = 0; i < width; ++i) {
-    cf.compute((block *)cipher_ptr, (block *)msg_cipher_bit, nullptr);
+    cf.compute(cipher_ptr, msg_cipher_bit, (const Bit *)nullptr);
 
     for (int j = 0; j < output_n; ++j)
       msg_cipher_bit[j] = cipher_ptr[j];
@@ -114,7 +114,7 @@ void test_merkle_tree(BoolIO<NetIO> *ios[threads], int party, int depth) {
   // inner nodes
   for (int j = 0; j < depth - 1; ++j) {
     for (int i = 0; i < width; ++i) {
-      cf.compute((block *)cipher_ptr, (block *)plain_ptr, nullptr);
+      cf.compute(cipher_ptr, plain_ptr, (const Bit *)nullptr);
       cipher_ptr += output_n;
       plain_ptr += output_n * 2;
     }
@@ -181,8 +181,9 @@ int main(int argc, char **argv) {
   // test_merkle_tree(ios, party, depth);
 
   for (int i = 0; i < threads; ++i) {
-    delete ios[i]->io;
+    NetIO *raw = ios[i]->io;
     delete ios[i];
+    delete raw;
   }
   return 0;
 }

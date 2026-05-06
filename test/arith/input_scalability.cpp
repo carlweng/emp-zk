@@ -103,8 +103,9 @@ int main(int argc, char **argv) {
   test_input_speed(ios, party, num);
 
   for (int i = 0; i < threads + 1; ++i) {
-    delete ios[i]->io;
+    NetIO *raw = ios[i]->io;
     delete ios[i];
+    delete raw;
   }
   return 0;
 }

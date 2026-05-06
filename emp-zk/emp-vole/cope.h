@@ -39,7 +39,7 @@ public:
     delta64_to_bool(delta_bool, delta);
 
     K = new block[m];
-    OTCO<IO> otco(io);
+    OTCO otco(io);
     otco.recv(K, delta_bool, m);
 
     G0 = new PRG[m];
@@ -54,7 +54,7 @@ public:
     K = new block[2 * m];
     PRG prg;
     prg.random_block(K, 2 * m);
-    OTCO<IO> otco(io);
+    OTCO otco(io);
     otco.send(K, K + m, m);
 
     G0 = new PRG[m];

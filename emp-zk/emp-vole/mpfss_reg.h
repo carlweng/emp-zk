@@ -4,6 +4,7 @@
 #include "emp-zk/emp-vole/preot.h"
 #include "emp-zk/emp-vole/utility.h"
 #include <emp-tool/emp-tool.h>
+#include <future>
 #include <set>
 
 using namespace emp;
@@ -81,7 +82,7 @@ public:
   void mpfss(OTPre<IO> *ot, __uint128_t *sparse_vector) {
     vector<SpfssSenderFp<IO> *> senders;
     vector<SpfssRecverFp<IO> *> recvers;
-    vector<future<void>> fut;
+    std::vector<std::future<void>> fut;
     for (int i = 0; i < tree_n; ++i) {
       if (party == 1) {
         senders.push_back(new SpfssSenderFp<IO>(netio, tree_height));
@@ -137,7 +138,7 @@ public:
     if (is_malicious) {
       block *seed = new block[threads];
       seed_expand(seed, threads);
-      vector<future<void>> fut;
+      std::vector<std::future<void>> fut;
       uint32_t start = 0, end = width;
       for (int i = 0; i < threads - 1; ++i) {
         fut.push_back(

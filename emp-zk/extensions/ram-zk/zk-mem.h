@@ -1,5 +1,7 @@
 #ifndef ZK_RAM_H__
 #define ZK_RAM_H__
+#include "emp-zk/emp-zk-bool/zk_bool_backend.h"
+#include "emp-zk/extensions/ram-zk/gf_base.h"
 #include "emp-zk/extensions/ram-zk/ostriple.h"
 
 template <typename IO> class ZKRAM {
@@ -19,8 +21,7 @@ public:
       : party(_party), index_sz(index_sz), step_sz(step_sz), val_sz(val_sz) {
     capacity = (capacity << index_sz);
     mem.resize(capacity);
-    ZKBoolCircExec<IO> *exec =
-        (ZKBoolCircExec<IO> *)(CircuitExecution::circ_exec);
+    ZKBoolCircExec<IO> *exec = emp::get_bool_circ<IO>();
     io = exec->ostriple->io;
     Delta = exec->ostriple->delta;
     ostriple =
@@ -34,14 +35,15 @@ public:
   void pack(block &mac, const Integer &index, const Integer &val,
             const Integer &step, const Bit &op) {
     block res, res1;
-    vector_inn_prdt_sum_red(&res, (block *)(val.bits.data()), gfp.base, val_sz);
-    gfmul(op.bit, gfp.base[val_sz], &res1);
+    vector_inn_prdt_sum_red(&res, (block *)(val.bits.data()), ramzk_gf_base(),
+                            val_sz);
+    gfmul(op.bit, ramzk_gf_base()[val_sz], &res1);
     res = res ^ res1;
     vector_inn_prdt_sum_red(&res1, (block *)(step.bits.data()),
-                            gfp.base + val_sz + 1, step_sz);
+                            ramzk_gf_base() + val_sz + 1, step_sz);
     res = res ^ res1;
     vector_inn_prdt_sum_red(&res1, (block *)(index.bits.data()),
-                            gfp.base + val_sz + 1 + step_sz, index_sz);
+                            ramzk_gf_base() + val_sz + 1 + step_sz, index_sz);
     res = res ^ res1;
     mac = res;
   }

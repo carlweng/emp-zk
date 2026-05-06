@@ -48,9 +48,10 @@ void test_vole_triple(
   NetIO **ios, 
   BoolIO<NetIO> **ios_bool,
   int party) {
-  // instantiate OT
-  FerretCOT<BoolIO<NetIO>> ferretcot(
-    3 - party, threads, ios_bool, true);
+  // instantiate OT (FerretCOT is no longer templated on IO; takes
+  // a polymorphic IOChannel** at construction)
+  FerretCOT ferretcot(
+    3 - party, threads, reinterpret_cast<IOChannel **>(ios_bool), true);
 
   // instantiate F2K VOLE
   SVoleF2k<BoolIO<NetIO>> vtriple(
@@ -117,8 +118,8 @@ int main(int argc, char **argv) {
   test_vole_triple(ios, ios_bool, party);
 
   for (int i = 0; i < threads; ++i) {
-    delete ios[i];
     delete ios_bool[i];
+    delete ios[i];
   }
   return 0;
 }

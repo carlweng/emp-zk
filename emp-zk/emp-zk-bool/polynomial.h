@@ -4,6 +4,13 @@
 #include "emp-ot/emp-ot.h"
 #include "emp-tool/emp-tool.h"
 
+using namespace emp;
+
+// emp-tool main spells the v0.3.x `Integer` as `SignedInt` (template
+// alias `using Integer = SignedInt;` lives in emp-sh2pc's umbrella).
+// emp-zk doesn't link emp-sh2pc, so re-introduce the alias locally.
+using Integer = SignedInt;
+
 template <typename IO> class PolyProof {
 public:
   int party;
@@ -15,9 +22,9 @@ public:
   block *buffer1 = nullptr;
   int num;
   GaloisFieldPacking pack;
-  FerretCOT<IO> *ferret = nullptr;
+  FerretCOT *ferret = nullptr;
 
-  PolyProof(int party, IO *io, FerretCOT<IO> *ferret) {
+  PolyProof(int party, IO *io, FerretCOT *ferret) {
     this->party = party;
     this->io = io;
     this->ferret = ferret;
@@ -54,7 +61,7 @@ public:
 
       vector_inn_prdt_sum_red(check_sum, chi, buffer, num);
       vector_inn_prdt_sum_red(check_sum + 1, chi, buffer1, num);
-      ferret->rcot(ope_data, 128);
+      ferret->rcot_send(ope_data, 128);
       block tmp;
       pack.packing(&tmp, ope_data);
       uint64_t choice_bits[2];
@@ -80,7 +87,7 @@ public:
       uni_hash_coeff_gen(chi, seed, num > 4 ? num : 4);
       block B;
       vector_inn_prdt_sum_red(&B, chi, buffer, num);
-      ferret->rcot(ope_data, 128);
+      ferret->rcot_send(ope_data, 128);
       block tmp;
       pack.packing(&tmp, ope_data);
 

@@ -1,5 +1,7 @@
 #ifndef ZK_RAM_EXT_H__
 #define ZK_RAM_EXT_H__
+#include "emp-zk/emp-zk-bool/zk_bool_backend.h"
+#include "emp-zk/extensions/ram-zk/gf_base.h"
 #include "emp-zk/extensions/ram-zk/ostriple.h"
 
 template <typename IO> class ZkRamExt {
@@ -28,8 +30,7 @@ public:
     val_uint64_sz = (val_sz + 63) / 64;
     if (_party == ALICE)
       mem.resize(capacity);
-    ZKBoolCircExec<IO> *exec =
-        (ZKBoolCircExec<IO> *)(CircuitExecution::circ_exec);
+    ZKBoolCircExec<IO> *exec = emp::get_bool_circ<IO>();
     io = exec->ostriple->io;
     Delta = exec->ostriple->delta;
     ostriple =
@@ -46,32 +47,32 @@ public:
     mac.resize(val.size() / 2 + 1);
     bool is_dummy = ((val.size() & 0x1) == 0x1) ? false : true;
     block res1, res2;
-    vector_inn_prdt_sum_red(&res1, (block *)(val[0].bits.data()), gfp.base,
+    vector_inn_prdt_sum_red(&res1, (block *)(val[0].bits.data()), ramzk_gf_base(),
                             val[0].bits.size());
-    gfmul(op.bit, gfp.base[val_bit_sz], &res2);
+    gfmul(op.bit, ramzk_gf_base()[val_bit_sz], &res2);
     res1 = res1 ^ res2;
     vector_inn_prdt_sum_red(&res2, (block *)(step.bits.data()),
-                            gfp.base + val_bit_sz + 1, step.bits.size());
+                            ramzk_gf_base() + val_bit_sz + 1, step.bits.size());
     res1 = res1 ^ res2;
     vector_inn_prdt_sum_red(&res2, (block *)(index.bits.data()),
-                            gfp.base + val_bit_sz + 1 + step_bit_sz,
+                            ramzk_gf_base() + val_bit_sz + 1 + step_bit_sz,
                             index.bits.size());
     mac[0] = res1 ^ res2;
     std::size_t i = 1, j = 1;
     for (; i < mac.size() - 1; ++i, j += 2) {
       vector_inn_prdt_sum_red(&res1, (block *)(val[j].bits.data()),
-                              gfp.base + val_bit_sz, val[j].bits.size());
+                              ramzk_gf_base() + val_bit_sz, val[j].bits.size());
       vector_inn_prdt_sum_red(&res2, (block *)(val[j + 1].bits.data()),
-                              gfp.base, val[j + 1].bits.size());
+                              ramzk_gf_base(), val[j + 1].bits.size());
       mac[i] = res1 ^ res2;
     }
     if (i < mac.size()) {
       res2 = zero_block;
       vector_inn_prdt_sum_red(&res1, (block *)(val[j].bits.data()),
-                              gfp.base + val_bit_sz, val[j].bits.size());
+                              ramzk_gf_base() + val_bit_sz, val[j].bits.size());
       if (!is_dummy)
         vector_inn_prdt_sum_red(&res2, (block *)(val[j + 1].bits.data()),
-                                gfp.base, val[j + 1].bits.size());
+                                ramzk_gf_base(), val[j + 1].bits.size());
       mac[i] = res1 ^ res2;
     }
   }

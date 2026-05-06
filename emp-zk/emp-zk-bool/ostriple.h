@@ -6,6 +6,12 @@
 #include "emp-zk/emp-zk-bool/cheat_record.h"
 #include "emp-zk/emp-zk-bool/triple_auth.h"
 
+// emp-tool main moved core types (block, makeBlock, getLSB, PRG, etc.)
+// fully into namespace emp; the helpers below pre-date that and use
+// them unqualified. Pull them in for the rest of the file. Same
+// pattern emp-vole uses today (emp-vole/utility.h line 4).
+using namespace emp;
+
 template <typename IO> class OSTriple {
 public:
   int party, threads;
@@ -25,7 +31,7 @@ public:
   IO *io;
   IO **ios;
   PRG prg;
-  FerretCOT<IO> *ferret = nullptr;
+  FerretCOT *ferret = nullptr;
   TripleAuth<IO> *auth_helper;
   ThreadPool *pool = nullptr;
   void *ferret_state = nullptr;
@@ -34,12 +40,16 @@ public:
     this->party = party;
     this->threads = threads;
     this->ferret_state = state;
-    // initiate Iterative COT with regular noise and security against malicious
-    // adv
+    // FerretCOT (emp-ot main) is no longer templated on IO and takes a
+    // polymorphic IOChannel**. The reinterpret_cast is safe so long as
+    // IO is a single-inheritance public subclass of IOChannel with the
+    // IOChannel subobject at offset 0 (true for NetIO, BoolIO<NetIO>,
+    // and every shipped emp-tool channel).
+    IOChannel **iochan_ios = reinterpret_cast<IOChannel **>(ios);
     if (ferret_state == nullptr)
-      ferret = new FerretCOT<IO>(3 - party, threads, ios, true);
+      ferret = new FerretCOT(3 - party, threads, iochan_ios, true);
     else {
-      ferret = new FerretCOT<IO>(3 - party, threads, ios, true, false);
+      ferret = new FerretCOT(3 - party, threads, iochan_ios, true, false);
       ferret->disassemble_state(ferret_state, 10400000);
     }
     this->delta = ferret->Delta;
@@ -52,7 +62,7 @@ public:
     andgate_right_buffer = new block[CHECK_SZ];
 
     block tmp;
-    ferret->rcot(&tmp, 1);
+    ferret->rcot_send(&tmp, 1);
 
     choice[0] = choice2[0] = zero_block;
     choice[1] = this->delta;
@@ -93,7 +103,7 @@ public:
    * authenticated bits for inputs of the prover
    */
   void authenticated_bits_input(block *auth, const bool *in, int len) {
-    ferret->rcot(auth, len);
+    ferret->rcot_send(auth, len);
 
     if (party == ALICE) {
       for (int i = 0; i < len; ++i) {
@@ -120,7 +130,7 @@ public:
       check_cnt = 0;
     }
 
-    ferret->rcot(&auth, 1);
+    ferret->rcot_send(&auth, 1);
     andgate_left_buffer[check_cnt] = a;
     andgate_right_buffer[check_cnt] = b;
 
@@ -144,7 +154,7 @@ public:
   void andgate_correctness_check_manage() {
     io->flush();
     block seed = io->get_hash_block();
-    vector<future<void>> fut;
+    std::vector<std::future<void>> fut;
 
     int share_seed_n = threads;
     block *share_seed = new block[share_seed_n];
@@ -169,7 +179,7 @@ public:
 
     if (party == ALICE) {
       block ope_data[128];
-      ferret->rcot(ope_data, 128);
+      ferret->rcot_send(ope_data, 128);
       uint64_t ch_bits[2];
       for (int i = 0; i < 2; ++i) {
         if (getLSB(ope_data[64 * i + 63]))
@@ -192,7 +202,7 @@ public:
       io->send_data(A_star, 2 * sizeof(block));
     } else {
       block ope_data[128];
-      ferret->rcot(ope_data, 128);
+      ferret->rcot_send(ope_data, 128);
       block B_star;
       pack.packing(&B_star, ope_data);
       for (int i = 0; i < threads; ++i)

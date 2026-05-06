@@ -3,7 +3,9 @@
 
 #include "emp-zk/emp-vole-f2k/spfss_f2k_recver.h"
 #include "emp-zk/emp-vole-f2k/spfss_f2k_sender.h"
+#include "emp-zk/emp-vole/preot.h"
 #include <emp-tool/emp-tool.h>
+#include <future>
 #include <set>
 
 namespace emp {
@@ -89,7 +91,7 @@ public:
   void mpfss(OTPre<IO> *ot, block *sparse_vector) {
     vector<SpfssF2kSend<IO> *> senders;
     vector<SpfssF2kRecv<IO> *> recvers;
-    vector<future<void>> fut;
+    std::vector<std::future<void>> fut;
     for (int i = 0; i < tree_n; ++i) {
       if (party == ALICE) {
         senders.push_back(new SpfssF2kSend<IO>(netio, tree_height));

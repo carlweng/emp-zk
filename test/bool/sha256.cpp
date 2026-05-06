@@ -5,7 +5,7 @@ const string circuit_file_location =
     macro_xstr(EMP_CIRCUIT_PATH) + string("bristol_format/");
 const int threads = 1;
 void get_plain(bool *res, bool *wit, const char *file) {
-  setup_plain_prot(false, "");
+  setup_clear_backend();
   BristolFormat cf(file);
   vector<Bit> W, P, O;
   W.resize(cf.n1);
@@ -20,7 +20,7 @@ void get_plain(bool *res, bool *wit, const char *file) {
   for (int i = 0; i < cf.n3; ++i) {
     res[i] = O[i].reveal<bool>(PUBLIC);
   }
-  finalize_plain_prot();
+  finalize_clear_backend();
 }
 int main(int argc, char **argv) {
   int party, port;
@@ -45,9 +45,9 @@ int main(int argc, char **argv) {
     O[i] = Bit(false, PUBLIC);
 
   BristolFormat cf(filename.c_str());
-  cf.compute((block *)O.data(), (block *)W.data(), nullptr);
+  cf.compute(O.data(), W.data(), (const Bit *)nullptr);
   for (int i = 0; i < 64; ++i)
-    cf.compute(O.data(), O.data(), nullptr);
+    cf.compute(O.data(), O.data(), (const Bit *)nullptr);
   for (int i = 0; i < 256; ++i) {
     bool tmp = O[i].reveal<bool>(PUBLIC);
     if (tmp != output[i])
@@ -59,8 +59,9 @@ int main(int argc, char **argv) {
     error("cheated\n");
 
   for (int i = 0; i < threads; ++i) {
-    delete ios[i]->io;
+    NetIO *raw = ios[i]->io;
     delete ios[i];
+    delete raw;
   }
 
   return 0;

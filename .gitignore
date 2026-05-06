@@ -1,6 +1,10 @@
-*CTestTestfile.cmake
-*Testing/
+Testing/
 *.DS_Store
+*.txt.cpp
+*CTestTestfile.cmake
+.exrc
+build/
+build-*/
 data/*
 *perf.data*
 CMakeCache.txt
@@ -40,9 +44,3 @@ install_manifest.txt
 
 # Emacs
 *~
-
-# CMake generated .h files
-emp-ot/latticeInclude.h
-
-# Eigen source
-eigen/

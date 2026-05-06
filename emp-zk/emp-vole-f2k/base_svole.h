@@ -9,12 +9,12 @@ public:
   int party;
   IO **ios;
   IO *io;
-  FerretCOT<IO> *ferret = nullptr;
+  FerretCOT *ferret = nullptr;
   block delta;
 
   GaloisFieldPacking pack;
 
-  BaseSVoleF2k(int party, IO **ios, FerretCOT<IO> *ferret)
+  BaseSVoleF2k(int party, IO **ios, FerretCOT *ferret)
       : party(party), ios(ios), ferret(ferret) {
 
     if (party == BOB)
@@ -27,7 +27,7 @@ public:
 
   void extend(block *val, block *mac, int num) {
     block *ferret_buffer = new block[num*128];
-    ferret->rcot(ferret_buffer, num*128);
+    ferret->rcot_send(ferret_buffer, num*128);
     std::size_t j = 0;
     for(std::size_t i = 0; i < num; ++i) {
       bool val_b[128];

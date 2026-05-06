@@ -19,7 +19,7 @@ public:
   F2kOSTriple<IO> *ostriple = nullptr;
   ROZKRAM(int _party, int index_sz, int val_sz)
       : party(_party), index_sz(index_sz), val_sz(val_sz) {
-    ZKBoolCircExec<IO> *exec = emp::get_bool_circ<IO>();
+    auto *exec = emp::get_bool_backend<IO>();
     io = exec->ostriple->io;
     Delta = exec->ostriple->delta;
     ostriple =

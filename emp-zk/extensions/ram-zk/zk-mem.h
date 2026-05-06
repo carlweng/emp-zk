@@ -21,7 +21,7 @@ public:
       : party(_party), index_sz(index_sz), step_sz(step_sz), val_sz(val_sz) {
     capacity = (capacity << index_sz);
     mem.resize(capacity);
-    ZKBoolCircExec<IO> *exec = emp::get_bool_circ<IO>();
+    auto *exec = emp::get_bool_backend<IO>();
     io = exec->ostriple->io;
     Delta = exec->ostriple->delta;
     ostriple =

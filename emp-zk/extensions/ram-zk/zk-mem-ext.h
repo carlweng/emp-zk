@@ -30,7 +30,7 @@ public:
     val_uint64_sz = (val_sz + 63) / 64;
     if (_party == ALICE)
       mem.resize(capacity);
-    ZKBoolCircExec<IO> *exec = emp::get_bool_circ<IO>();
+    auto *exec = emp::get_bool_backend<IO>();
     io = exec->ostriple->io;
     Delta = exec->ostriple->delta;
     ostriple =

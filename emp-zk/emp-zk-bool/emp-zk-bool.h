@@ -7,21 +7,17 @@
 
 namespace emp {
 
-inline void setup_zk_bool(BoolIO **ios, int threads, int party,
-                          void *state = nullptr) {
+inline void setup_zk_bool(BoolIO **ios, int threads, int party) {
   CheatRecord::reset();
   if (party == ALICE)
-    backend = new ZKBoolBackendPrv(ios, threads, state);
+    backend = new ZKBoolBackendPrv(ios, threads);
   else
-    backend = new ZKBoolBackendVer(ios, threads, state);
+    backend = new ZKBoolBackendVer(ios, threads);
 }
 
-inline block get_bool_delta(int party) {
-  if (party == BOB)
-    return get_bool_backend_ver()->delta;
-  else
-    return zero_block;
-}
+// Verifier-only. Returns the global MAC secret Δ. Only the verifier
+// holds it; calling on the prover side is a programmer error.
+inline block get_bool_delta() { return get_bool_backend_ver()->delta; }
 
 inline void sync_zk_bool() { get_bool_backend()->sync(); }
 

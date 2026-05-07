@@ -38,8 +38,7 @@ inline void setup_zk_arith(IO **ios, int threads, int party,
       EdaBits<IO>::conv = new EdaBits<IO>(
           BOB, threads, ios,
           ((ZKFpExecVer<IO> *)(ZKFpExec::zk_exec))->ostriple->vole);
-      EdaBits<IO>::conv->install_boolean(
-          emp::get_bool_circ_ver()->delta);
+      EdaBits<IO>::conv->install_boolean(emp::get_bool_delta());
     }
   }
 }

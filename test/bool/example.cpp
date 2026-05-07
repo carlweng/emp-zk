@@ -1,3 +1,4 @@
+#include "../test_io_helpers.h"
 #include "emp-tool/emp-tool.h"
 #include <emp-zk/emp-zk.h>
 #include <iostream>
@@ -21,17 +22,10 @@ void test_circuit_zk(BoolIO *ios[threads], int party) {
 int main(int argc, char **argv) {
   parse_party_and_port(argv, &party, &port);
   BoolIO *ios[threads];
-  for (int i = 0; i < threads; ++i)
-    ios[i] = new BoolIO(
-        new NetIO(party == ALICE ? nullptr : "127.0.0.1", port + i),
-        party == ALICE);
+  make_bool_ios(ios, party, port);
 
   test_circuit_zk(ios, party);
 
-  for (int i = 0; i < threads; ++i) {
-    NetIO *raw = static_cast<NetIO *>(ios[i]->io);
-    delete ios[i];
-    delete raw;
-  }
+  destroy_bool_ios(ios);
   return 0;
 }

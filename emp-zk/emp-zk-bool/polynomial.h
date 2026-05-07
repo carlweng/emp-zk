@@ -4,7 +4,7 @@
 #include "emp-ot/emp-ot.h"
 #include "emp-tool/emp-tool.h"
 
-using namespace emp;
+namespace emp {
 
 // emp-tool main spells the v0.3.x `Integer` as `SignedInt` (template
 // alias `using Integer = SignedInt;` lives in emp-sh2pc's umbrella).
@@ -13,37 +13,28 @@ using Integer = SignedInt;
 
 class PolyProof {
 public:
+  static constexpr int buffer_sz = 1 << 20;
+
   int party;
   IOChannel *io;
   block delta;
-  int buffer_sz = 1000 * 1000;
-  // int buffer_sz = 4096;
-  block *buffer = nullptr;
-  block *buffer1 = nullptr;
+  block *buffer = nullptr;  // ALICE: A0 (Δ⁰ coeff); BOB: full B = poly(Δ)
+  block *buffer1 = nullptr; // ALICE: A1 (Δ¹ coeff); BOB: unused
   int num;
   GaloisFieldPacking pack;
   FerretCOT *ferret = nullptr;
 
-  PolyProof(int party, IOChannel *io, FerretCOT *ferret) {
-    this->party = party;
-    this->io = io;
-    this->ferret = ferret;
-    this->delta = ferret->Delta;
-    if (party == ALICE) {
-      buffer = new block[buffer_sz];
+  PolyProof(int party, IOChannel *io, FerretCOT *ferret)
+      : party(party), io(io), delta(ferret->Delta), ferret(ferret), num(0) {
+    buffer = new block[buffer_sz];
+    if (party == ALICE)
       buffer1 = new block[buffer_sz];
-    } else {
-      buffer = new block[buffer_sz];
-    }
-    num = 0;
   }
 
   ~PolyProof() {
     batch_check();
-    if (buffer != nullptr)
-      delete[] buffer;
-    if (buffer1 != nullptr)
-      delete[] buffer1;
+    delete[] buffer;
+    delete[] buffer1;
   }
 
   void batch_check() {
@@ -103,51 +94,50 @@ public:
     delete[] chi;
   }
 
+  // Accumulators for one (a, b) pair into the per-call A0 / A1 (ALICE)
+  // or B (BOB). Algebra:
+  //   commitment(a)·commitment(b) = a·b + (a·b̃+b·ã)·Δ + ã·b̃·Δ²
+  // ALICE collects the Δ⁰ term in A0 and the Δ¹ term in A1; BOB
+  // evaluates the prover's polynomial at his secret Δ into B. Both
+  // sides MAC into the LSB so getLSB(x) extracts the cleartext bit.
+  inline void accumulate_alice(block a, block b, block &A0, block &A1) const {
+    block t;
+    gfmul(a, b, &t);
+    A0 = A0 ^ t;
+    A1 = A1 ^ (getLSB(b) ? a : zero_block) ^ (getLSB(a) ? b : zero_block);
+  }
+  inline void accumulate_bob(block a, block b, block &B) const {
+    block t;
+    gfmul(a, b, &t);
+    B = B ^ t;
+  }
+  // Δ² masking term BOB xors in when a public constant bit is set.
+  // Only zkp_poly_deg2 (coeff[0]) and zkp_inner_prdt (constant) use
+  // it; the other variants pass false and pay nothing.
+  inline block bob_constant_term(bool b) const {
+    if (!b)
+      return zero_block;
+    block t;
+    gfmul(delta, delta, &t);
+    return t;
+  }
+
   inline void zkp_poly_deg2(block *polyx, block *polyy, bool *coeff, int len) {
     if (num >= buffer_sz)
       batch_check();
-
-    block choice[2];
-    choice[0] = zero_block;
     if (party == ALICE) {
       block A0 = zero_block, A1 = zero_block;
-      block m0, m1, tmp0, tmp1;
-      bool w0, w1;
-      for (int i = 0; i < len; ++i) {
-        w0 = getLSB(polyx[i]);
-        m0 = polyx[i];
-        w1 = getLSB(polyy[i]);
-        m1 = polyy[i];
-
-        gfmul(m0, m1, &tmp0);
-        choice[1] = tmp0;
-        tmp0 = choice[coeff[i + 1]];
-        A0 = A0 ^ tmp0;
-
-        choice[1] = m0;
-        tmp0 = choice[w1];
-        choice[1] = m1;
-        tmp1 = choice[w0];
-        tmp0 = tmp0 ^ tmp1;
-        choice[1] = tmp0;
-        tmp0 = choice[coeff[i + 1]];
-        A1 = A1 ^ tmp0;
-      }
+      for (int i = 0; i < len; ++i)
+        if (coeff[i + 1])
+          accumulate_alice(polyx[i], polyy[i], A0, A1);
       buffer[num] = A0;
       buffer1[num] = A1;
     } else {
       block B = zero_block;
-      block tmp;
-      for (int i = 0; i < len; ++i) {
-        gfmul(polyx[i], polyy[i], &tmp);
-        choice[1] = tmp;
-        tmp = choice[coeff[i + 1]];
-        B = B ^ tmp;
-      }
-      gfmul(delta, delta, &tmp);
-      choice[1] = tmp;
-      tmp = choice[coeff[0]];
-      B = B ^ tmp;
+      for (int i = 0; i < len; ++i)
+        if (coeff[i + 1])
+          accumulate_bob(polyx[i], polyy[i], B);
+      B = B ^ bob_constant_term(coeff[0]);
       buffer[num] = B;
     }
     num++;
@@ -157,42 +147,17 @@ public:
                              int len) {
     if (num >= buffer_sz)
       batch_check();
-
-    block choice[2];
-    choice[0] = zero_block;
     if (party == ALICE) {
       block A0 = zero_block, A1 = zero_block;
-      block m0, m1, tmp0, tmp1;
-      bool w0, w1;
-      for (int i = 0; i < len; ++i) {
-        w0 = getLSB(polyx[i]);
-        m0 = polyx[i];
-        w1 = getLSB(polyy[i]);
-        m1 = polyy[i];
-
-        gfmul(m0, m1, &tmp0);
-        A0 = A0 ^ tmp0;
-
-        choice[1] = m0;
-        tmp0 = choice[w1];
-        choice[1] = m1;
-        tmp1 = choice[w0];
-        tmp0 = tmp0 ^ tmp1;
-        A1 = A1 ^ tmp0;
-      }
+      for (int i = 0; i < len; ++i)
+        accumulate_alice(polyx[i], polyy[i], A0, A1);
       buffer[num] = A0;
       buffer1[num] = A1;
     } else {
       block B = zero_block;
-      block tmp;
-      for (int i = 0; i < len; ++i) {
-        gfmul(polyx[i], polyy[i], &tmp);
-        B = B ^ tmp;
-      }
-      gfmul(delta, delta, &tmp);
-      choice[1] = tmp;
-      tmp = choice[constant];
-      B = B ^ tmp;
+      for (int i = 0; i < len; ++i)
+        accumulate_bob(polyx[i], polyy[i], B);
+      B = B ^ bob_constant_term(constant);
       buffer[num] = B;
     }
     num++;
@@ -202,64 +167,20 @@ public:
                                 int len, int len2) {
     if (num >= buffer_sz)
       batch_check();
-
-    block choice[2];
-    choice[0] = zero_block;
     if (party == ALICE) {
       block A0 = zero_block, A1 = zero_block;
-      block m0, m1, tmp0, tmp1;
-      bool w0, w1;
-      for (int i = 0; i < len; ++i) {
-        w0 = getLSB(polyx[i]);
-        m0 = polyx[i];
-        w1 = getLSB(polyy[i]);
-        m1 = polyy[i];
-
-        gfmul(m0, m1, &tmp0);
-        A0 = A0 ^ tmp0;
-
-        choice[1] = m0;
-        tmp0 = choice[w1];
-        choice[1] = m1;
-        tmp1 = choice[w0];
-        tmp0 = tmp0 ^ tmp1;
-        A1 = A1 ^ tmp0;
-      }
-      for (int i = 0; i < len2; ++i) {
-        w0 = getLSB(r[i]);
-        m0 = r[i];
-        w1 = getLSB(s[i]);
-        m1 = s[i];
-
-        gfmul(m0, m1, &tmp0);
-        A0 = A0 ^ tmp0;
-
-        choice[1] = m0;
-        tmp0 = choice[w1];
-        choice[1] = m1;
-        tmp1 = choice[w0];
-        tmp0 = tmp0 ^ tmp1;
-        A1 = A1 ^ tmp0;
-      }
-
+      for (int i = 0; i < len; ++i)
+        accumulate_alice(polyx[i], polyy[i], A0, A1);
+      for (int i = 0; i < len2; ++i)
+        accumulate_alice(r[i], s[i], A0, A1);
       buffer[num] = A0;
       buffer1[num] = A1;
     } else {
       block B = zero_block;
-      block tmp;
-      for (int i = 0; i < len; ++i) {
-        gfmul(polyx[i], polyy[i], &tmp);
-        B = B ^ tmp;
-      }
-      for (int i = 0; i < len2; ++i) {
-        gfmul(r[i], s[i], &tmp);
-        B = B ^ tmp;
-      }
-
-      gfmul(delta, delta, &tmp);
-      choice[1] = tmp;
-      tmp = choice[0];
-      B = B ^ tmp;
+      for (int i = 0; i < len; ++i)
+        accumulate_bob(polyx[i], polyy[i], B);
+      for (int i = 0; i < len2; ++i)
+        accumulate_bob(r[i], s[i], B);
       buffer[num] = B;
     }
     num++;
@@ -269,84 +190,22 @@ public:
                                 block *rr, block *ss, int len, int len2) {
     if (num >= buffer_sz)
       batch_check();
-
-    block choice[2];
-    choice[0] = zero_block;
     if (party == ALICE) {
       block A0 = zero_block, A1 = zero_block;
-      block m0, m1, tmp0, tmp1;
-      bool w0, w1;
-      for (int i = 0; i < len; ++i) {
-        w0 = getLSB(polyx[i]);
-        m0 = polyx[i];
-        w1 = getLSB(polyy[i]);
-        m1 = polyy[i];
-
-        gfmul(m0, m1, &tmp0);
-        A0 = A0 ^ tmp0;
-
-        choice[1] = m0;
-        tmp0 = choice[w1];
-        choice[1] = m1;
-        tmp1 = choice[w0];
-        tmp0 = tmp0 ^ tmp1;
-        A1 = A1 ^ tmp0;
-      }
-      for (int i = 0; i < len2; ++i) {
-        w0 = getLSB(r[i]);
-        m0 = r[i];
-        w1 = getLSB(s[i]);
-        m1 = s[i];
-
-        gfmul(m0, m1, &tmp0);
-        A0 = A0 ^ tmp0;
-
-        choice[1] = m0;
-        tmp0 = choice[w1];
-        choice[1] = m1;
-        tmp1 = choice[w0];
-        tmp0 = tmp0 ^ tmp1;
-        A1 = A1 ^ tmp0;
-      }
-      {
-        w0 = getLSB(*rr);
-        m0 = *rr;
-        w1 = getLSB(*ss);
-        m1 = *ss;
-
-        gfmul(m0, m1, &tmp0);
-        A0 = A0 ^ tmp0;
-
-        choice[1] = m0;
-        tmp0 = choice[w1];
-        choice[1] = m1;
-        tmp1 = choice[w0];
-        tmp0 = tmp0 ^ tmp1;
-        A1 = A1 ^ tmp0;
-      }
-
+      for (int i = 0; i < len; ++i)
+        accumulate_alice(polyx[i], polyy[i], A0, A1);
+      for (int i = 0; i < len2; ++i)
+        accumulate_alice(r[i], s[i], A0, A1);
+      accumulate_alice(*rr, *ss, A0, A1);
       buffer[num] = A0;
       buffer1[num] = A1;
     } else {
       block B = zero_block;
-      block tmp;
-      for (int i = 0; i < len; ++i) {
-        gfmul(polyx[i], polyy[i], &tmp);
-        B = B ^ tmp;
-      }
-      for (int i = 0; i < len2; ++i) {
-        gfmul(r[i], s[i], &tmp);
-        B = B ^ tmp;
-      }
-      {
-        gfmul(*rr, *ss, &tmp);
-        B = B ^ tmp;
-      }
-
-      gfmul(delta, delta, &tmp);
-      choice[1] = tmp;
-      tmp = choice[0];
-      B = B ^ tmp;
+      for (int i = 0; i < len; ++i)
+        accumulate_bob(polyx[i], polyy[i], B);
+      for (int i = 0; i < len2; ++i)
+        accumulate_bob(r[i], s[i], B);
+      accumulate_bob(*rr, *ss, B);
       buffer[num] = B;
     }
     num++;
@@ -357,67 +216,24 @@ public:
     for (int width = 0; width < in_width; ++width) {
       if (num >= buffer_sz)
         batch_check();
-
-      block choice[2];
-      choice[0] = zero_block;
       if (party == ALICE) {
         block A0 = zero_block, A1 = zero_block;
-        block m0, m1, tmp0, tmp1;
-        bool w0, w1;
-        for (int i = 0; i < len; ++i) {
-          w0 = getLSB(polyx[i][width].bit);
-          m0 = polyx[i][width].bit;
-          w1 = getLSB(polyy[0][i].bit);
-          m1 = polyy[0][i].bit;
-
-          gfmul(m0, m1, &tmp0);
-          A0 = A0 ^ tmp0;
-
-          choice[1] = m0;
-          tmp0 = choice[w1];
-          choice[1] = m1;
-          tmp1 = choice[w0];
-          tmp0 = tmp0 ^ tmp1;
-          A1 = A1 ^ tmp0;
-        }
-        {
-          w0 = getLSB(r[width].bit);
-          m0 = r[width].bit;
-          w1 = getLSB(s->bit);
-          m1 = s->bit;
-
-          gfmul(m0, m1, &tmp0);
-          A0 = A0 ^ tmp0;
-
-          choice[1] = m0;
-          tmp0 = choice[w1];
-          choice[1] = m1;
-          tmp1 = choice[w0];
-          tmp0 = tmp0 ^ tmp1;
-          A1 = A1 ^ tmp0;
-        }
-
+        for (int i = 0; i < len; ++i)
+          accumulate_alice(polyx[i][width].bit, polyy[0][i].bit, A0, A1);
+        accumulate_alice(r[width].bit, s->bit, A0, A1);
         buffer[num] = A0;
         buffer1[num] = A1;
       } else {
         block B = zero_block;
-        block tmp;
-        for (int i = 0; i < len; ++i) {
-          gfmul(polyx[i][width].bit, polyy[0][i].bit, &tmp);
-          B = B ^ tmp;
-        }
-        {
-          gfmul(r[width].bit, s->bit, &tmp);
-          B = B ^ tmp;
-        }
-        gfmul(delta, delta, &tmp);
-        choice[1] = tmp;
-        tmp = choice[0];
-        B = B ^ tmp;
+        for (int i = 0; i < len; ++i)
+          accumulate_bob(polyx[i][width].bit, polyy[0][i].bit, B);
+        accumulate_bob(r[width].bit, s->bit, B);
         buffer[num] = B;
       }
       num++;
     }
   }
 };
+
+} // namespace emp
 #endif

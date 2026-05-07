@@ -1,5 +1,7 @@
+#include "../test_io_helpers.h"
 #include <emp-zk/emp-zk.h>
 #include <iostream>
+using namespace emp;
 using namespace std;
 const string circuit_file_location =
     macro_xstr(EMP_CIRCUIT_PATH) + string("bristol_format/");
@@ -31,10 +33,7 @@ int main(int argc, char **argv) {
   bool *output = new bool[256];
   get_plain(output, witness, filename.c_str());
   BoolIO *ios[threads];
-  for (int i = 0; i < threads; ++i)
-    ios[i] = new BoolIO(
-        new NetIO(party == ALICE ? nullptr : "127.0.0.1", port + i),
-        party == ALICE);
+  make_bool_ios(ios, party, port);
 
   setup_zk_bool(ios, threads, party);
   vector<Bit> W, O;
@@ -58,11 +57,7 @@ int main(int argc, char **argv) {
   if (cheated)
     error("cheated\n");
 
-  for (int i = 0; i < threads; ++i) {
-    NetIO *raw = static_cast<NetIO *>(ios[i]->io);
-    delete ios[i];
-    delete raw;
-  }
+  destroy_bool_ios(ios);
 
   return 0;
 }

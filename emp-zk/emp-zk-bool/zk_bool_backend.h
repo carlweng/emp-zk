@@ -34,11 +34,17 @@ class ZKBoolBackendBase : public Backend {
 public:
   int64_t gid = 0;
   block pub_label[2];
-  BoolIO *io = nullptr;
   OSTriple *ostriple = nullptr;
   PolyProof *polyproof = nullptr;
 
-  ZKBoolBackendBase(int p) : Backend(p) {}
+  ZKBoolBackendBase(int p, BoolIO **ios, int threads) : Backend(p) {
+    PRG prg(fix_key);
+    prg.random_block(pub_label, 2);
+    pub_label[0] = OSTriple::clear_lsb(pub_label[0]);
+    pub_label[1] = OSTriple::clear_lsb(pub_label[1]);
+    ostriple = new OSTriple(p, threads, ios);
+    polyproof = new PolyProof(p, ios[0], ostriple->ferret);
+  }
   ~ZKBoolBackendBase() override {
     delete polyproof;
     delete ostriple;
@@ -84,19 +90,9 @@ public:
 // MAC-checked verify_output protocol (to_party == BOB / PUBLIC).
 class ZKBoolBackendPrv : public ZKBoolBackendBase {
 public:
-  ZKBoolBackendPrv(BoolIO **ios, int threads, void *state)
-      : ZKBoolBackendBase(ALICE) {
-    PRG prg(fix_key);
-    prg.random_block(pub_label, 2);
-    pub_label[0] =
-        pub_label[0] & makeBlock(0xFFFFFFFFFFFFFFFFULL, 0xFFFFFFFFFFFFFFFEULL);
-    pub_label[1] =
-        pub_label[1] & makeBlock(0xFFFFFFFFFFFFFFFFULL, 0xFFFFFFFFFFFFFFFEULL);
+  ZKBoolBackendPrv(BoolIO **ios, int threads)
+      : ZKBoolBackendBase(ALICE, ios, threads) {
     pub_label[1] = pub_label[1] ^ makeBlock(0, 1);
-
-    io = ios[0];
-    ostriple = new OSTriple(ALICE, threads, ios, state);
-    polyproof = new PolyProof(ALICE, ios[0], ostriple->ferret);
   }
 
   void not_gate(void *o, const void *in) override {
@@ -123,20 +119,8 @@ class ZKBoolBackendVer : public ZKBoolBackendBase {
 public:
   block delta, zdelta;
 
-  ZKBoolBackendVer(BoolIO **ios, int threads, void *state)
-      : ZKBoolBackendBase(BOB) {
-    PRG prg(fix_key);
-    prg.random_block(pub_label, 2);
-    pub_label[0] =
-        pub_label[0] & makeBlock(0xFFFFFFFFFFFFFFFFULL, 0xFFFFFFFFFFFFFFFEULL);
-    pub_label[1] =
-        pub_label[1] & makeBlock(0xFFFFFFFFFFFFFFFFULL, 0xFFFFFFFFFFFFFFFEULL);
-
-    io = ios[0];
-    ostriple = new OSTriple(BOB, threads, ios, state);
-    polyproof = new PolyProof(BOB, ios[0], ostriple->ferret);
-    polyproof->delta = ostriple->delta;
-
+  ZKBoolBackendVer(BoolIO **ios, int threads)
+      : ZKBoolBackendBase(BOB, ios, threads) {
     delta = ostriple->delta;
     zdelta = delta ^ makeBlock(0, 1);
     pub_label[1] = pub_label[1] ^ zdelta;
@@ -164,14 +148,6 @@ inline ZKBoolBackendPrv *get_bool_backend_prv() {
 inline ZKBoolBackendVer *get_bool_backend_ver() {
   return static_cast<ZKBoolBackendVer *>(backend);
 }
-
-// Source-compat aliases so existing callers keep building. The
-// returned pointer no longer points at a separate ZKBoolCircExec
-// object; it's the Backend subclass itself, which carries the same
-// ostriple / polyproof / delta members.
-inline ZKBoolBackendBase *get_bool_circ() { return get_bool_backend(); }
-inline ZKBoolBackendPrv *get_bool_circ_prv() { return get_bool_backend_prv(); }
-inline ZKBoolBackendVer *get_bool_circ_ver() { return get_bool_backend_ver(); }
 
 } // namespace emp
 #endif

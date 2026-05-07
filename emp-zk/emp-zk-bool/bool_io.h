@@ -77,69 +77,74 @@ public:
     io->recv_data(data, nbyte);
   }
 
+  // Pack 8 bool-bytes (the LSB of each, the rest is required to be 0
+  // by the bool[] storage convention) into one packed byte. PEXT does
+  // it in one instruction on Haswell+; the // https://github.com/Forceflow/libmorton/issues/6
+  // fallback walks the mask one bit at a time on older targets.
+  static inline uint8_t pack_8bools(uint64_t eight_bytes) {
+    constexpr uint64_t mask = 0x0101010101010101ULL;
+#if defined(__BMI2__)
+    return static_cast<uint8_t>(_pext_u64(eight_bytes, mask));
+#else
+    uint64_t tmp = 0, m = mask;
+    for (uint64_t bb = 1; m != 0; bb += bb) {
+      if (eight_bytes & m & -m)
+        tmp |= bb;
+      m &= (m - 1);
+    }
+    return static_cast<uint8_t>(tmp);
+#endif
+  }
+  static inline uint64_t unpack_8bools(uint8_t packed) {
+    constexpr uint64_t mask = 0x0101010101010101ULL;
+#if defined(__BMI2__)
+    return _pdep_u64(packed, mask);
+#else
+    uint64_t out = 0, m = mask;
+    for (uint64_t bb = 1; m != 0; bb += bb) {
+      if (packed & bb)
+        out |= m & -m;
+      m &= (m - 1);
+    }
+    return out;
+#endif
+  }
+
   void send_bool_raw(const bool *data, int length) {
     if (tmp_arr.size() < (size_t)length / 8)
       tmp_arr.resize(length / 8);
-    int cnt = 0;
 
-    unsigned long long *data64 = (unsigned long long *)data;
-    int i = 0;
-    for (; i < length / 8; ++i) {
-      unsigned long long mask = 0x0101010101010101ULL;
-      unsigned long long tmp = 0;
-#if defined(__BMI2__)
-      tmp = _pext_u64(data64[i], mask);
-#else
-      // https://github.com/Forceflow/libmorton/issues/6
-      for (unsigned long long bb = 1; mask != 0; bb += bb) {
-        if (data64[i] & mask & -mask) {
-          tmp |= bb;
-        }
-        mask &= (mask - 1);
-      }
-#endif
-      tmp_arr[cnt] = tmp;
-      cnt++;
-    }
-    hash.put(tmp_arr.data(), cnt);
-    io->send_data(tmp_arr.data(), cnt);
-    counter += cnt;
+    auto *data64 = reinterpret_cast<const unsigned long long *>(data);
+    int whole = length / 8;
+    for (int i = 0; i < whole; ++i)
+      tmp_arr[i] = pack_8bools(data64[i]);
+    hash.put(tmp_arr.data(), whole);
+    io->send_data(tmp_arr.data(), whole);
+    counter += whole;
 
-    if (8 * i != length) {
-      hash.put(data + 8 * i, length - 8 * i);
-      io->send_data(data + 8 * i, length - 8 * i);
-      counter += (length - 8 * i);
+    if (8 * whole != length) {
+      int rem = length - 8 * whole;
+      hash.put(data + 8 * whole, rem);
+      io->send_data(data + 8 * whole, rem);
+      counter += rem;
     }
   }
   void recv_bool_raw(bool *data, int length) {
     if (tmp_arr.size() < (size_t)length / 8)
       tmp_arr.resize(length / 8);
 
-    int cnt = 0;
-    io->recv_data(tmp_arr.data(), length / 8);
-    hash.put(tmp_arr.data(), length / 8);
+    int whole = length / 8;
+    io->recv_data(tmp_arr.data(), whole);
+    hash.put(tmp_arr.data(), whole);
 
-    unsigned long long *data64 = (unsigned long long *)data;
-    int i = 0;
-    for (; i < length / 8; ++i) {
-      unsigned long long mask = 0x0101010101010101ULL;
-      unsigned long long tmp = tmp_arr[cnt];
-      cnt++;
-#if defined(__BMI2__)
-      data64[i] = _pdep_u64(tmp, mask);
-#else
-      data64[i] = 0;
-      for (unsigned long long bb = 1; mask != 0; bb += bb) {
-        if (tmp & bb) {
-          data64[i] |= mask & (-mask);
-        }
-        mask &= (mask - 1);
-      }
-#endif
-    }
-    if (8 * i != length) {
-      io->recv_data(data + 8 * i, length - 8 * i);
-      hash.put(data + 8 * i, length - 8 * i);
+    auto *data64 = reinterpret_cast<unsigned long long *>(data);
+    for (int i = 0; i < whole; ++i)
+      data64[i] = unpack_8bools(tmp_arr[i]);
+
+    if (8 * whole != length) {
+      int rem = length - 8 * whole;
+      io->recv_data(data + 8 * whole, rem);
+      hash.put(data + 8 * whole, rem);
     }
   }
 };

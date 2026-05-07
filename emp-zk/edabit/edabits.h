@@ -1,6 +1,8 @@
 #ifndef EDABITS_H__
 #define EDABITS_H__
 
+#include <algorithm>
+
 #include "emp-ot/emp-ot.h"
 #include "emp-tool/emp-tool.h"
 #include "emp-zk/edabit/auth_helper.h"
@@ -97,7 +99,7 @@ public:
       for (uint32_t i = 0; i < ell; ++i)
         bool_candidate[i] = Integer(62, 0, ALICE);
     }
-    get_bool_circ_prv()->ostriple->io->flush();
+    get_bool_backend()->ostriple->io->flush();
 
     // Generate a random point to do the permutation
     rand_pt = random_point(ell_faulty);
@@ -130,7 +132,7 @@ public:
         // TODO boolean addition and selection costs a lot, and it should be
         // subtraction
       }
-      emp::get_bool_circ_prv()->ostriple->io->flush();
+      emp::get_bool_backend()->ostriple->io->flush();
       if (party == ALICE)
         auth_helper->open_check_send(f2_to_check, fp_to_check, N);
       else
@@ -163,33 +165,14 @@ public:
   }
 
   void bool2arith(__uint128_t *out, const Integer *in, size_t len) {
-    int counter = 0;
-    int round1_num, round, leftover;
-    if (len <= edabit_num) {
-      round = 1;
-      round1_num = len;
-      leftover = 0;
-    } else {
-      round1_num = edabit_num;
-      round = (len - edabit_num) / N + 2;
-      leftover = (len - edabit_num) % N;
-      if (leftover == 0) {
-        round--;
-        leftover = N;
-      }
-      if (!edabit_num) {
-        round--;
-        round1_num = N;
-        if (round == 1)
-          round1_num = leftover;
-      }
-    }
-    for (int j = 0; j < round; ++j) {
-      int num = N;
-      if (j == round - 1)
-        num = leftover;
-      if (j == 0)
-        num = round1_num;
+    size_t off = 0;
+    while (off < len) {
+      // Cap each chunk at the edabits remaining in the current buffer
+      // (or N, the size of a fresh batch) so the chunk never spans a
+      // regen boundary — edabits_gen_backend() inside next_edabits
+      // does its own I/O and can't be interleaved with a bulk send.
+      size_t avail = (edabit_num > 0) ? edabit_num : N;
+      int num = static_cast<int>(std::min(len - off, avail));
 
       uint32_t edab_f2;
       uint32_t *edab_fp = new uint32_t[num];
@@ -197,7 +180,7 @@ public:
       Integer *diff_bool = new Integer[num];
       for (int i = 0; i < num; ++i) {
         next_edabits(edab_f2, edab_fp[i]);
-        diff_bool[i] = in[counter + i] - bool_candidate[edab_f2];
+        diff_bool[i] = in[off + i] - bool_candidate[edab_f2];
         diff_bool[i] = diff_bool[i].select(diff_bool[i].bits[61],
                                            diff_bool[i] + int_boo_pr);
       }
@@ -207,12 +190,11 @@ public:
         auth_helper->open_check_recv(diff, diff_bool, num);
       ios[0]->flush();
       for (int i = 0; i < num; ++i)
-        out[counter + i] =
-            intfp_add_const(arith_candidate[edab_fp[i]], diff[i]);
+        out[off + i] = intfp_add_const(arith_candidate[edab_fp[i]], diff[i]);
       delete[] edab_fp;
       delete[] diff;
       delete[] diff_bool;
-      counter += num;
+      off += num;
     }
   }
 
@@ -234,34 +216,10 @@ public:
   }
 
   void arith2bool(Integer *out, const __uint128_t *in, size_t len) {
-    int counter = 0;
-    int round1_num, round, leftover;
-    if (len <= edabit_num) {
-      round = 1;
-      round1_num = len;
-      leftover = 0;
-    } else {
-      round1_num = edabit_num;
-      round = (len - edabit_num) / N + 2;
-      leftover = (len - edabit_num) % N;
-      if (leftover == 0) {
-        round--;
-        leftover = N;
-      }
-      if (!edabit_num) {
-        round--;
-        round1_num = N;
-        if (round == 1)
-          round1_num = leftover;
-      }
-    }
-
-    for (int j = 0; j < round; ++j) {
-      int num = N;
-      if (j == round - 1)
-        num = leftover;
-      if (j == 0)
-        num = round1_num;
+    size_t off = 0;
+    while (off < len) {
+      size_t avail = (edabit_num > 0) ? edabit_num : N;
+      int num = static_cast<int>(std::min(len - off, avail));
 
       uint32_t edab_fp;
       uint32_t *edab_f2 = new uint32_t[num];
@@ -269,7 +227,7 @@ public:
       uint64_t *sum = new uint64_t[num];
       for (int i = 0; i < num; ++i) {
         next_edabits(edab_f2[i], edab_fp);
-        sum_fp[i] = intfp_add(arith_candidate[edab_fp], in[counter + i]);
+        sum_fp[i] = intfp_add(arith_candidate[edab_fp], in[off + i]);
       }
       if (party == ALICE)
         auth_helper->open_check_send(sum, sum_fp, num);
@@ -279,13 +237,13 @@ public:
       for (int i = 0; i < num; ++i) {
         Integer sum_boo = Integer(62, sum[i], PUBLIC);
         sum_boo = sum_boo - bool_candidate[edab_f2[i]];
-        out[counter + i] =
+        out[off + i] =
             sum_boo.select(sum_boo.bits[61], sum_boo + int_boo_pr);
       }
       delete[] edab_f2;
       delete[] sum_fp;
       delete[] sum;
-      counter += num;
+      off += num;
     }
   }
 

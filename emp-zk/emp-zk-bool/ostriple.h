@@ -4,53 +4,43 @@
 #include "emp-ot/emp-ot.h"
 #include "emp-zk/emp-zk-bool/bool_io.h"
 #include "emp-zk/emp-zk-bool/cheat_record.h"
-#include "emp-zk/emp-zk-bool/triple_auth.h"
 
-// emp-tool main moved core types (block, makeBlock, getLSB, PRG, etc.)
-// fully into namespace emp; the helpers below pre-date that and use
-// them unqualified. Pull them in for the rest of the file. Same
-// pattern emp-vole uses today (emp-vole/utility.h line 4).
-using namespace emp;
+namespace emp {
 
 class OSTriple {
 public:
+  static constexpr int64_t CHECK_SZ = 1024 * 1024;
+
   int party, threads;
   block delta;
 
-  // managing buffers storing COTs
   int check_cnt = 0;
   block *andgate_out_buffer = nullptr;
   block *andgate_left_buffer = nullptr;
   block *andgate_right_buffer = nullptr;
 
   GaloisFieldPacking pack;
-  int64_t CHECK_SZ = 1024 * 1024;
 
-  block choice[2], choice2[2];
-  block minusone, one;
   BoolIO *io;
   BoolIO **ios;
   PRG prg;
   FerretCOT *ferret = nullptr;
-  TripleAuth *auth_helper;
   ThreadPool *pool = nullptr;
-  void *ferret_state = nullptr;
 
-  OSTriple(int party, int threads, BoolIO **ios, void *state = nullptr) {
-    this->party = party;
-    this->threads = threads;
-    this->ferret_state = state;
+  // Output-MAC accumulator (formerly the separate TripleAuth helper).
+  // Folded in because OSTriple already owns delta + io and the helper
+  // was a thin Hash wrapper using the same delta-based xor.
+  Hash auth_hash;
+  vector<block> auth_tmp;
+
+  OSTriple(int party, int threads, BoolIO **ios)
+      : party(party), threads(threads) {
     // FerretCOT takes IOChannel**; BoolIO is a single-inheritance public
     // subclass with the IOChannel subobject at offset 0, so the cast is
     // a no-op at runtime.
     IOChannel **iochan_ios = reinterpret_cast<IOChannel **>(ios);
-    if (ferret_state == nullptr)
-      ferret = new FerretCOT(3 - party, threads, iochan_ios, true);
-    else {
-      ferret = new FerretCOT(3 - party, threads, iochan_ios, true, false);
-      ferret->disassemble_state(ferret_state, 10400000);
-    }
-    this->delta = ferret->Delta;
+    ferret = new FerretCOT(3 - party, threads, iochan_ios, true);
+    delta = ferret->Delta;
     io = ios[0];
     this->ios = ios;
     pool = new ThreadPool(threads);
@@ -61,31 +51,17 @@ public:
 
     block tmp;
     ferret->rcot_send(&tmp, 1);
-
-    choice[0] = choice2[0] = zero_block;
-    choice[1] = this->delta;
-    minusone = makeBlock(0xFFFFFFFFFFFFFFFFLL, 0xFFFFFFFFFFFFFFFELL);
-    one = makeBlock(0x0L, 0x1L);
-    choice2[1] = one;
-
-    auth_helper = new TripleAuth(party, io);
-    if (party == BOB)
-      auth_helper->set_delta(this->delta);
   }
 
   ~OSTriple() {
-    if (check_cnt != 0) {
+    if (check_cnt != 0)
       andgate_correctness_check_manage();
-    }
-    if (!auth_helper->finalize())
+    if (!finalize_macs())
       CheatRecord::put("emp-zk-bool finalize");
-    if (ferret_state != nullptr)
-      ferret->assemble_state(ferret_state, 10400000);
     delete ferret;
     delete[] andgate_out_buffer;
     delete[] andgate_left_buffer;
     delete[] andgate_right_buffer;
-    delete auth_helper;
     delete pool;
   }
 
@@ -94,6 +70,21 @@ public:
     for (int i = 0; i < threads; ++i)
       res += ios[i]->counter;
     return res;
+  }
+
+  /* ---------------------helper bit ops----------------------*/
+
+  // The authenticated-bit format keeps the cleartext bit in the LSB
+  // and the MAC in the upper 127 bits. clear_lsb / with_lsb / xor_delta_if
+  // express that as named ops rather than ad-hoc choice[]/minusone tricks.
+  static block clear_lsb(block b) {
+    return b & makeBlock(0xFFFFFFFFFFFFFFFFULL, 0xFFFFFFFFFFFFFFFEULL);
+  }
+  static block with_lsb(block b, bool v) {
+    return clear_lsb(b) ^ makeBlock(0, v ? 1 : 0);
+  }
+  block xor_delta_if(block b, bool cond) const {
+    return cond ? (b ^ delta) : b;
   }
 
   /* ---------------------inputs----------------------*/
@@ -106,14 +97,13 @@ public:
     if (party == ALICE) {
       for (int i = 0; i < len; ++i) {
         bool buff = getLSB(auth[i]) ^ in[i];
-        set_value_in_block(auth[i], in[i]);
+        auth[i] = with_lsb(auth[i], in[i]);
         io->send_bit(buff);
       }
     } else {
       for (int i = 0; i < len; ++i) {
         bool buff = io->recv_bit();
-        auth[i] = auth[i] ^ choice[buff];
-        set_zero_bit(auth[i]);
+        auth[i] = clear_lsb(xor_delta_if(auth[i], buff));
       }
     }
   }
@@ -135,12 +125,11 @@ public:
     if (party == ALICE) {
       bool s = getLSB(a) and getLSB(b);
       bool d = s ^ getLSB(auth);
-      set_value_in_block(auth, s);
+      auth = with_lsb(auth, s);
       io->send_bit(d);
     } else {
       bool d = io->recv_bit();
-      auth = auth ^ choice[d];
-      set_zero_bit(auth);
+      auth = clear_lsb(xor_delta_if(auth, d));
     }
     andgate_out_buffer[check_cnt] = auth;
     check_cnt++;
@@ -158,8 +147,13 @@ public:
     block *share_seed = new block[share_seed_n];
     PRG(&seed).random_block(share_seed, share_seed_n);
 
+    // Distribute check_cnt tasks across `threads` workers. Workers
+    // 0..threads-2 each handle task_base; the last takes whatever is
+    // left. The leftover formula must be defined when task_base == 0
+    // (i.e., check_cnt < threads), so we compute it as a subtraction
+    // rather than the prior `task_base + check_cnt % task_base` form.
     uint32_t task_base = check_cnt / threads;
-    uint32_t leftover = task_base + (check_cnt % task_base);
+    uint32_t leftover = check_cnt - task_base * (threads - 1);
     uint32_t start = 0;
     block *sum = new block[2 * threads];
     for (int i = 0; i < threads - 1; ++i) {
@@ -227,16 +221,12 @@ public:
     block *gateout = andgate_out_buffer;
 
     if (party == ALICE) {
-      block ch_tmp[2];
-      ch_tmp[0] = zero_block;
       for (uint32_t i = start; i < start + task_n; ++i) {
         block A0, A1;
         gfmul(left[i], right[i], &A0);
-        ch_tmp[1] = right[i];
-        A1 = ch_tmp[getLSB(left[i])];
-        ch_tmp[1] = left[i];
-        A1 = A1 ^ ch_tmp[getLSB(right[i])];
-        A1 = A1 ^ gateout[i];
+        A1 = (getLSB(left[i]) ? right[i] : zero_block) ^
+             (getLSB(right[i]) ? left[i] : zero_block) ^
+             gateout[i];
         left[i] = A0;
         right[i] = A1;
       }
@@ -263,8 +253,9 @@ public:
   }
 
   /*
-   * verify the output
-   * open and check if the value equals 1
+   * verify the output: open one bit per element, drain its MAC into
+   * the auth_hash transcript, and let finalize_macs() compare digests
+   * at teardown.
    */
   void verify_output(bool *b, const block *output, int length) {
     for (int i = 0; i < length; ++i) {
@@ -276,82 +267,36 @@ public:
       }
     }
     if (party == ALICE) {
-      auth_helper->prv_check(b, output, length);
-    } else
-      auth_helper->ver_check(b, output, length);
+      auth_hash.put_block(output, length);
+    } else {
+      if (auth_tmp.size() < (size_t)length)
+        auth_tmp.resize(length);
+      for (int i = 0; i < length; ++i)
+        auth_tmp[i] = xor_delta_if(output[i], b[i]);
+      auth_hash.put_block(auth_tmp.data(), length);
+    }
   }
 
-  /* ---------------------helper functions----------------------*/
-  void set_zero_bit(block &b) { b = b & minusone; }
-
-  void set_value_in_block(block &b, bool v) {
-    b = b & minusone;
-    b = b ^ choice2[v];
+  bool finalize_macs() {
+    char digest[Hash::DIGEST_SIZE];
+    auth_hash.digest(digest);
+    if (party == ALICE) {
+      io->send_data(digest, Hash::DIGEST_SIZE);
+      io->flush();
+      return true;
+    } else {
+      char digest2[Hash::DIGEST_SIZE];
+      io->recv_data(digest2, Hash::DIGEST_SIZE);
+      return memcmp(digest, digest2, Hash::DIGEST_SIZE) == 0;
+    }
   }
 
   void sync() {
     io->flush();
-    for (int i = 0; i < threads; ++i) {
+    for (int i = 0; i < threads; ++i)
       ios[i]->flush();
-    }
-  }
-
-  /* ---------------------debug functions----------------------*/
-
-  void check_auth_mac(block *auth, bool *in, int len, IOChannel *tio) {
-    if (party == ALICE) {
-      tio->send_data(auth, len * sizeof(block));
-      tio->send_data(in, len * sizeof(bool));
-    } else {
-      block *auth_recv = new block[len];
-      tio->recv_data(auth_recv, len * sizeof(block));
-      tio->recv_data(in, len * sizeof(bool));
-      for (int i = 0; i < len; ++i) {
-        if (in[i] != getLSB(auth_recv[i]))
-          error("check1");
-        set_zero_bit(auth[i]);
-        block mac = auth[i] ^ choice[in[i]];
-        if (!cmpBlock(&mac, &auth_recv[i], 1))
-          error("check2");
-      }
-      delete[] auth_recv;
-    }
-  }
-  void check_compute_and(block *a, block *b, block *c, int len, IOChannel *tio) {
-    if (party == ALICE) {
-      tio->send_data(a, len * sizeof(block));
-      tio->send_data(b, len * sizeof(block));
-      tio->send_data(c, len * sizeof(block));
-    } else {
-      block *recv = new block[3 * len];
-      tio->recv_data(recv, len * sizeof(block));
-      tio->recv_data(recv + len, len * sizeof(block));
-      tio->recv_data(recv + 2 * len, len * sizeof(block));
-      for (int i = 0; i < len; ++i) {
-        bool ar = getLSB(recv[i]);
-        bool br = getLSB(recv[len + i]);
-        bool cr = getLSB(recv[2 * len + i]);
-        if (cr != (ar & br))
-          error("check3");
-        block v[3];
-        v[0] = a[i];
-        v[1] = b[i];
-        v[2] = c[i];
-        set_zero_bit(v[0]);
-        set_zero_bit(v[1]);
-        set_zero_bit(v[2]);
-        v[0] = v[0] ^ choice[ar];
-        v[1] = v[1] ^ choice[br];
-        v[2] = v[2] ^ choice[cr];
-        if (!cmpBlock(v, recv + i, 1))
-          error("check4");
-        if (!cmpBlock(v + 1, recv + len + i, 1))
-          error("check5");
-        if (!cmpBlock(v + 2, recv + 2 * len + i, 1))
-          error("check6");
-      }
-      delete[] recv;
-    }
   }
 };
+
+} // namespace emp
 #endif

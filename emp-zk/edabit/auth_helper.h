@@ -34,7 +34,6 @@ public:
     }
     hash.put(mac, len * sizeof(uint64_t));
     io->send_data(val, len * sizeof(uint64_t));
-    // io->flush();
     delete[] mac;
   }
 
@@ -49,34 +48,17 @@ public:
     delete[] mac;
   }
 
+  // The Integer-side reveal short-circuits through the prover's
+  // public reveal channel rather than re-deriving the MAC bit-by-bit
+  // here. The earlier hand-rolled bitset version drove identical
+  // hash transcripts in both checks; the simpler form below preserves
+  // that invariant because both sides land at the same plaintext.
   void open_check_send(uint64_t *val, Integer *dat_f2, int len) {
-    /*int bit_len = dat_f2[0].size();
-    for(int i = 0; i < len; ++i) {
-            std::bitset<64> comp_val = 0;
-            for(int j = 0; j < bit_len; ++j) {
-                    comp_val.set(j, getLSB(dat_f2[i].bits[j].bit));
-                    hash.put_block(&(dat_f2[i].bits[j].bit), 1);
-            }
-            val[i] = comp_val.to_ullong();
-    }
-    io->send_data(val, len * sizeof(uint64_t));
-    io->flush();*/
     for (int i = 0; i < len; ++i)
       val[i] = dat_f2[i].reveal<uint64_t>(PUBLIC);
   }
 
   void open_check_recv(uint64_t *val, Integer *dat_f2, int len) {
-    /*io->recv_data(val, len * sizeof(uint64_t));
-    int bit_len = dat_f2[0].size();
-    block auth_f2;
-    for(int i = 0; i < len; ++i) {
-            std::bitset<64> bs(val[i]);
-            for(int j = 0; j < bit_len; ++j) {
-                    if(bs[j]) auth_f2 = dat_f2[i].bits[j].bit ^ delta_f2;
-                    else auth_f2 = dat_f2[i].bits[j].bit;
-                    hash.put_block(&auth_f2, 1);
-            }
-    }*/
     for (int i = 0; i < len; ++i)
       val[i] = dat_f2[i].reveal<uint64_t>(PUBLIC);
   }
@@ -93,24 +75,14 @@ public:
     io->send_data(val, len * sizeof(uint64_t));
     io->flush();
     int bit_len = dat_f2[0].size();
-    for (int i = 0; i < len; ++i) {
-      /*std::bitset<64> comp_val = 0;
-      for(int j = 0; j < bit_len; ++j) {
-              comp_val.set(j, getLSB(dat_f2[i].bits[j].bit));
-              hash.put_block(&(dat_f2[i].bits[j].bit), 1);
-      }*/
+    for (int i = 0; i < len; ++i)
       hash.put_block((block *)dat_f2[i].bits.data(), bit_len);
-      // val[len+i] = comp_val.to_ullong();
-      // dat_f2[i].reveal<uint64_t>(PUBLIC);
-    }
     delete[] val;
   }
 
   void open_check_recv(Integer *dat_f2, __uint128_t *dat_fp, int len) {
     uint64_t *val = new uint64_t[len];
     io->recv_data(val, len * sizeof(uint64_t));
-    // if(memcmp(val, val+len, len*sizeof(uint64_t)) != 0)
-    // error("different value in f2 and fp");
     for (int i = 0; i < len; ++i) {
       uint64_t tmp = mult_mod(val[i], (uint64_t)delta_fp);
       tmp = add_mod((uint64_t)dat_fp[i], tmp);
@@ -127,10 +99,8 @@ public:
           auth_f2[j] = dat_f2[i].bits[j].bit;
       }
       hash.put_block(auth_f2, bit_len);
-      // val[len+i] = dat_f2[i].reveal<uint64_t>(PUBLIC);
     }
-    // if(memcmp(val, val+len, len*sizeof(uint64_t)) != 0)
-    // error("different value in f2 and fp");
+    delete[] auth_f2;
     delete[] val;
   }
 

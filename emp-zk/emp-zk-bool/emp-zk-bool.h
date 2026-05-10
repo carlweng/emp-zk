@@ -1,15 +1,15 @@
 #ifndef EMP_ZK_BOOL_H__
 #define EMP_ZK_BOOL_H__
 #include "emp-zk/emp-zk-bool/polynomial.h"
-#include "emp-zk/emp-zk-bool/zk_bool_backend.h"
+#include "emp-zk/emp-zk-bool/zk_bool_base.h"
 
 namespace emp {
 
-inline void setup_zk_bool(BoolIO **ios, int threads, int party) {
+inline void setup_zk_bool(BoolIO *io, int party) {
   if (party == ALICE)
-    backend = new ZKBoolBackendPrv(ios, threads);
+    backend = new ZKBoolProver(io);
   else
-    backend = new ZKBoolBackendVer(ios, threads);
+    backend = new ZKBoolVerifier(io);
 }
 
 // Verifier-only. Returns the global MAC secret Δ. Only the verifier

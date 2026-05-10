@@ -15,7 +15,7 @@ void test_polynomial(BoolIO *ios[threads], int party) {
   bool *witness = new bool[2 * sz];
   memset(witness, 0, 2 * sz * sizeof(bool));
 
-  setup_zk_bool(ios, threads, party);
+  setup_zk_bool(ios[0], party);
   sync_zk_bool();
 
   Bit *x = new Bit[2 * sz];

@@ -22,7 +22,7 @@ uint64_t comm2(BoolIO *ios[threads]) {
   return c;
 }
 void bench(BoolIO *ios[threads], int party) {
-  setup_zk_bool(ios, threads, party);
+  setup_zk_bool(ios[0], party);
   uint64_t com1 = comm(ios);
   uint64_t com11 = comm2(ios);
   auto start = clock_start();
@@ -55,7 +55,7 @@ void bench(BoolIO *ios[threads], int party) {
 }
 
 void test(BoolIO *ios[threads], int party) {
-  setup_zk_bool(ios, threads, party);
+  setup_zk_bool(ios[0], party);
   ZKRAM<BoolIO> *ram =
       new ZKRAM<BoolIO>(party, index_sz, step_sz, val_sz);
   for (int i = 0; i < (1 << index_sz); ++i) {

@@ -44,7 +44,7 @@ void test_merkle_tree_dfs(BoolIO *ios[threads], int party, int depth) {
   std::cout << "number of nodes: " << (2 * width - 1) << std::endl;
 
   auto start = clock_start();
-  setup_zk_bool(ios, threads, party);
+  setup_zk_bool(ios[0], party);
 
   bool *witness = new bool[width];
   PRG prg;
@@ -91,7 +91,7 @@ void test_merkle_tree(BoolIO *ios[threads], int party, int depth) {
   std::cout << "number of nodes: " << (2 * width - 1) << std::endl;
 
   auto start = clock_start();
-  setup_zk_bool(ios, threads, party);
+  setup_zk_bool(ios[0], party);
 
   Bit *msg_cipher_bit = new Bit[input_n];
   Bit *dig_cipher_bit = new Bit[output_n * (2 * width - 1)];

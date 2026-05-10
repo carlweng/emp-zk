@@ -14,7 +14,7 @@ void test_mix_circuit(BoolIO *ios[threads], int party, int sz) {
   for (int i = 0; i < sz; ++i)
     a[i] = rand() % PR;
 
-  setup_zk_bool(ios, threads, party);
+  setup_zk_bool(ios[0], party);
   setup_zk_arith<BoolIO>(ios, threads, party, true);
 
   IntFp *x = new IntFp[sz];

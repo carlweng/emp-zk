@@ -9,7 +9,7 @@ const int threads = 1;
 int index_sz = 5, step_sz = 18, val_sz = 128;
 
 void test(BoolIO *ios[threads], int party) {
-  setup_zk_bool(ios, threads, party);
+  setup_zk_bool(ios[0], party);
   ZkRamExt<BoolIO> *ram =
       new ZkRamExt<BoolIO>(party, index_sz, step_sz, val_sz);
 

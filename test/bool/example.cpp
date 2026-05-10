@@ -9,7 +9,7 @@ int port, party;
 const int threads = 1;
 
 void test_circuit_zk(BoolIO *ios[threads], int party) {
-  setup_zk_bool(ios, threads, party);
+  setup_zk_bool(ios[0], party);
   Integer a(32, 3, ALICE);
   Integer b(32, 2, ALICE);
   cout << (a - b).reveal<uint32_t>(PUBLIC) << endl;

@@ -1,6 +1,6 @@
 #ifndef ZK_RAM_EXT_H__
 #define ZK_RAM_EXT_H__
-#include "emp-zk/emp-zk-bool/zk_bool_backend.h"
+#include "emp-zk/emp-zk-bool/zk_bool_base.h"
 #include "emp-zk/emp-zk-bool/ram-zk/gf_base.h"
 #include "emp-zk/emp-zk-bool/ram-zk/ostriple.h"
 
@@ -34,8 +34,8 @@ public:
     io = exec->io;
     Delta = exec->delta;
     ostriple =
-        new F2kOSTriple<IO>(party, exec->threads, exec->ios,
-                            exec->ferret, exec->pool);
+        new F2kOSTriple<IO>(party, /*threads=*/1, &exec->io,
+                            exec->ferret, /*pool=*/nullptr);
   }
 
   ~ZkRamExt() { delete ostriple; }

@@ -1,28 +1,27 @@
-#ifndef EMP_ZK_BOOL_BACKEND_VER_H__
-#define EMP_ZK_BOOL_BACKEND_VER_H__
+#ifndef EMP_ZK_BOOL_VERIFIER_H__
+#define EMP_ZK_BOOL_VERIFIER_H__
 
 // Verifier-side Backend (BOB). Owns the BOB branches of the
 // authenticated-triple protocol that used to live in OSTriple.
-// Included from zk_bool_backend.h.
+// Included from zk_bool.h.
 
 namespace emp {
 
-class ZKBoolBackendVer : public ZKBoolBackendBase {
+class ZKBoolVerifier : public ZKBoolBase {
 public:
   // The verifier holds delta (and zdelta = delta ^ 1 for negation). Both
-  // are also reachable via ZKBoolBackendBase::delta; zdelta is verifier-
+  // are also reachable via ZKBoolBase::delta; zdelta is verifier-
   // specific because NOT folds it on the wire.
   block zdelta;
 
-  ZKBoolBackendVer(BoolIO **ios, int threads)
-      : ZKBoolBackendBase(BOB, ios, threads) {
+  ZKBoolVerifier(BoolIO *io) : ZKBoolBase(BOB, io) {
     zdelta = delta ^ makeBlock(0, 1);
     // PUBLIC label for bit 1: xor zdelta in so the wire MAC is right
     // even though there's no cleartext flip.
     pub_label[1] = pub_label[1] ^ zdelta;
   }
 
-  ~ZKBoolBackendVer() override {
+  ~ZKBoolVerifier() override {
     if (check_cnt != 0)
       andgate_correctness_check_manage();
 
@@ -112,14 +111,14 @@ private:
 
   // ---- Per-thread + aggregation hooks (called from base skeleton) -------
 
-  void andgate_correctness_check(block *ret, int thr_i, uint32_t start,
-                                  uint32_t task_n, block chi_seed) override {
+  void andgate_correctness_check(block *ret, uint32_t task_n,
+                                 block chi_seed) override {
     if (task_n == 0) return;
     block *left    = andgate_left_buffer.data();
     block *right   = andgate_right_buffer.data();
     block *gateout = andgate_out_buffer.data();
 
-    for (uint32_t i = start; i < start + task_n; ++i) {
+    for (uint32_t i = 0; i < task_n; ++i) {
       block B;
       gfmul(left[i], right[i], &B);
       block tmp;
@@ -130,7 +129,7 @@ private:
 
     std::vector<block> chi(task_n);
     uni_hash_coeff_gen(chi.data(), chi_seed, task_n);
-    vector_inn_prdt_sum_red(ret + thr_i, chi.data(), left + start, task_n);
+    vector_inn_prdt_sum_red(ret + 0, chi.data(), left, task_n);
   }
 
   void andgate_correctness_aggregate(block *sum) override {
@@ -138,8 +137,7 @@ private:
     take_rcot(ope_data, 128);
     block B_star;
     pack.packing(&B_star, ope_data);
-    for (int i = 0; i < threads; ++i)
-      B_star = B_star ^ sum[i];
+    B_star = B_star ^ sum[0];
     block A_star[2];
     io->recv_data(A_star, 2 * sizeof(block));
     block W;
@@ -150,8 +148,8 @@ private:
   }
 };
 
-inline ZKBoolBackendVer *get_bool_backend_ver() {
-  return static_cast<ZKBoolBackendVer *>(backend);
+inline ZKBoolVerifier *get_bool_backend_ver() {
+  return static_cast<ZKBoolVerifier *>(backend);
 }
 
 } // namespace emp

@@ -13,7 +13,7 @@ void test_circuit_zk(BoolIO *ios[threads], int party, int log_trial) {
   long long input_sz = 1 << log_trial;
   if (input_sz < 100000000LL) {
     auto start = clock_start();
-    setup_zk_bool(ios, threads, party);
+    setup_zk_bool(ios[0], party);
     Integer *a = new Integer[input_sz / 32];
     for (int i = 0; i < input_sz / 32; ++i)
       a[i] = Integer(32, i, ALICE);
@@ -26,7 +26,7 @@ void test_circuit_zk(BoolIO *ios[threads], int party, int log_trial) {
   } else {
     long long unit = 1 << 24;
     auto start = clock_start();
-    setup_zk_bool(ios, threads, party);
+    setup_zk_bool(ios[0], party);
     int round = input_sz / unit;
     Integer **a = (Integer **)malloc(round * sizeof(Bit *));
     for (int i = 0; i < round; ++i) {

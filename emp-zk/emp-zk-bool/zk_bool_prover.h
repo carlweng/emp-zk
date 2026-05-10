@@ -1,22 +1,21 @@
-#ifndef EMP_ZK_BOOL_BACKEND_PRV_H__
-#define EMP_ZK_BOOL_BACKEND_PRV_H__
+#ifndef EMP_ZK_BOOL_PROVER_H__
+#define EMP_ZK_BOOL_PROVER_H__
 
 // Prover-side Backend (ALICE). Owns the ALICE branches of the
 // authenticated-triple protocol that used to live in OSTriple.
-// Included from zk_bool_backend.h.
+// Included from zk_bool.h.
 
 namespace emp {
 
-class ZKBoolBackendPrv : public ZKBoolBackendBase {
+class ZKBoolProver : public ZKBoolBase {
 public:
-  ZKBoolBackendPrv(BoolIO **ios, int threads)
-      : ZKBoolBackendBase(ALICE, ios, threads) {
+  ZKBoolProver(BoolIO *io) : ZKBoolBase(ALICE, io) {
     // PUBLIC label for bit 1 has its LSB set so getLSB() reads back the
     // cleartext value. (Verifier instead xors zdelta into pub_label[1].)
     pub_label[1] = pub_label[1] ^ makeBlock(0, 1);
   }
 
-  ~ZKBoolBackendPrv() override {
+  ~ZKBoolProver() override {
     if (check_cnt != 0)
       andgate_correctness_check_manage();
 
@@ -62,8 +61,6 @@ public:
   }
 
 private:
-  // ---- ALICE-side OSTriple methods --------------------------------------
-
   // Authenticated-bit input: receive a fresh COT pair, embed the cleartext
   // bit in the LSB, send the masking flip to BOB.
   void authenticated_bits_input(block *auth, const bool *in, int len) {
@@ -110,16 +107,14 @@ private:
     auth_hash.put_block(output, length);
   }
 
-  // ---- Per-thread + aggregation hooks (called from base skeleton) -------
-
-  void andgate_correctness_check(block *ret, int thr_i, uint32_t start,
-                                  uint32_t task_n, block chi_seed) override {
+  void andgate_correctness_check(block *ret, uint32_t task_n,
+                                 block chi_seed) override {
     if (task_n == 0) return;
     block *left    = andgate_left_buffer.data();
     block *right   = andgate_right_buffer.data();
     block *gateout = andgate_out_buffer.data();
 
-    for (uint32_t i = start; i < start + task_n; ++i) {
+    for (uint32_t i = 0; i < task_n; ++i) {
       block A0, A1;
       gfmul(left[i], right[i], &A0);
       A1 = (getLSB(left[i])  ? right[i] : zero_block) ^
@@ -131,8 +126,8 @@ private:
 
     std::vector<block> chi(task_n);
     uni_hash_coeff_gen(chi.data(), chi_seed, task_n);
-    vector_inn_prdt_sum_red(ret + 2 * thr_i,     chi.data(), left  + start, task_n);
-    vector_inn_prdt_sum_red(ret + 2 * thr_i + 1, chi.data(), right + start, task_n);
+    vector_inn_prdt_sum_red(ret + 0, chi.data(), left,  task_n);
+    vector_inn_prdt_sum_red(ret + 1, chi.data(), right, task_n);
   }
 
   void andgate_correctness_aggregate(block *sum) override {
@@ -149,16 +144,14 @@ private:
     block A_star[2];
     A_star[1] = makeBlock(ch_bits[1], ch_bits[0]);
     pack.packing(A_star, ope_data);
-    for (int i = 0; i < threads; ++i) {
-      A_star[0] = A_star[0] ^ sum[2 * i];
-      A_star[1] = A_star[1] ^ sum[2 * i + 1];
-    }
+    A_star[0] = A_star[0] ^ sum[0];
+    A_star[1] = A_star[1] ^ sum[1];
     io->send_data(A_star, 2 * sizeof(block));
   }
 };
 
-inline ZKBoolBackendPrv *get_bool_backend_prv() {
-  return static_cast<ZKBoolBackendPrv *>(backend);
+inline ZKBoolProver *get_bool_backend_prv() {
+  return static_cast<ZKBoolProver *>(backend);
 }
 
 } // namespace emp

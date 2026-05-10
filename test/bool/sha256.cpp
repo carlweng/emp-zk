@@ -35,7 +35,7 @@ int main(int argc, char **argv) {
   BoolIO *ios[threads];
   make_bool_ios(ios, party, port);
 
-  setup_zk_bool(ios, threads, party);
+  setup_zk_bool(ios[0], party);
   vector<Bit> W, O;
   for (int i = 0; i < 512; ++i)
     W.push_back(Bit(witness[i], ALICE));

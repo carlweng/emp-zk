@@ -22,7 +22,7 @@ uint64_t comm2(BoolIO *ios[threads]) {
   return c;
 }
 void bench(BoolIO *ios[threads], int party) {
-  setup_zk_bool(ios, threads, party);
+  setup_zk_bool(ios[0], party);
   vector<Integer> data;
   int test_n = (1 << index_sz) * 2;
   for (int i = 0; i < (1 << index_sz); ++i)
@@ -55,7 +55,7 @@ void bench(BoolIO *ios[threads], int party) {
 }
 
 void test(BoolIO *ios[threads], int party) {
-  setup_zk_bool(ios, threads, party);
+  setup_zk_bool(ios[0], party);
   vector<Integer> data;
   int test_n = (1 << index_sz);
   for (int i = 0; i < test_n; ++i)

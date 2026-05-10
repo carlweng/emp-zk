@@ -1,27 +1,24 @@
-#ifndef EMP_ZK_BOOL_BACKEND_H__
-#define EMP_ZK_BOOL_BACKEND_H__
+#ifndef EMP_ZK_BOOL_BASE_H__
+#define EMP_ZK_BOOL_BASE_H__
 
 // emp-zk-bool's plug into the unified Backend* backend on emp-tool
-// main. The v0.3.x design split the same machinery across two
-// classes (ZKBoolCircExec for AND/XOR/NOT/public-label and
-// ZKProver/ZKVerifier for input feeding + output revealing) wired
-// up via the two static singletons CircuitExecution::circ_exec and
-// ProtocolExecution::prot_exec. Backend collapses both singletons
-// into one virtual interface.
+// main. Single-threaded; one BoolIO* drives both the gate-level bool
+// stream and FerretCOT's OT-extension data.
 //
 // Layout:
-//   - zk_bool_backend.h     — ZKBoolBackendBase: shared state + threading
-//                             skeleton, with virtual hooks for the role-
-//                             specific per-thread and aggregation work.
-//   - zk_bool_backend_prv.h — ZKBoolBackendPrv: prover-only methods
-//                             (auth_compute_and, authenticated_bits_input,
-//                             verify_output, finalize_macs, hooks) and the
-//                             Backend overrides routing to them.
-//   - zk_bool_backend_ver.h — symmetric for the verifier.
+//   - zk_bool_base.h     — ZKBoolBase: shared state + the AND-gate
+//                          batch correctness-check entry point, with
+//                          virtual hooks for the role-specific check
+//                          and aggregator.
+//   - zk_bool_prover.h   — ZKBoolProver: ALICE-side methods
+//                          (auth_compute_and, authenticated_bits_input,
+//                          verify_output, finalize_macs, hooks) and the
+//                          Backend overrides routing to them.
+//   - zk_bool_verifier.h — symmetric for the verifier.
 //
 // What used to be a separate OSTriple class is folded directly into
 // the backend hierarchy: state goes on the base, prover-specific
-// methods go in ZKBoolBackendPrv, verifier-specific in ZKBoolBackendVer.
+// methods go in ZKBoolProver, verifier-specific in ZKBoolVerifier.
 // Removes the runtime party dispatch (`if (party == ALICE) … else …`)
 // scattered through every method.
 
@@ -32,12 +29,11 @@
 
 namespace emp {
 
-class ZKBoolBackendBase : public Backend {
+class ZKBoolBase : public Backend {
 public:
   static constexpr int64_t CHECK_SZ = 1024 * 1024;
 
-  // ---- Shared state (formerly OSTriple + ZKBoolBackendBase) -----------
-  int threads;
+  // ---- Shared state (formerly OSTriple + ZKBoolBase) -----------
   block delta;          // FerretCOT global secret. Prover side just stores it.
   int64_t gid = 0;      // Number of AND gates issued.
   block pub_label[2];   // Labels for PUBLIC-input bits.
@@ -50,10 +46,8 @@ public:
 
   GaloisFieldPacking pack;
   BoolIO  *io  = nullptr;
-  BoolIO **ios = nullptr;
   PRG prg;
   FerretCOT  *ferret    = nullptr;
-  ThreadPool *pool      = nullptr;
   PolyProof  *polyproof = nullptr;
 
   // Output-MAC accumulator. Hash + scratch buffer; finalize at teardown.
@@ -111,20 +105,14 @@ public:
 
   // ---- Lifecycle ------------------------------------------------------
 
-  ZKBoolBackendBase(int p, BoolIO **ios_, int threads_)
-      : Backend(p), threads(threads_) {
+  ZKBoolBase(int p, BoolIO *io_) : Backend(p), io(io_) {
     // BoolIO inherits IOChannel publicly with the IOChannel subobject at
     // offset 0, so the cast is a no-op at runtime. FerretCOT now takes a
-    // single IOChannel (post-unification with the other OT extensions);
-    // the per-thread IO array is still kept on this side and used by the
-    // ThreadPool for the rest of the bool ZK protocol.
-    IOChannel *iochan = reinterpret_cast<IOChannel *>(ios_[0]);
+    // single IOChannel (post-unification with the other OT extensions).
+    IOChannel *iochan = reinterpret_cast<IOChannel *>(io_);
     ferret = new FerretCOT(3 - p, iochan, /*malicious=*/true, /*run_setup=*/true);
     ferret_is_sender = (p == BOB);   // ferret_party = 3-p; sender ⇔ ferret_party == ALICE
     delta = ferret->Delta;
-    io = ios_[0];
-    ios = ios_;
-    pool = new ThreadPool(threads_);
 
     andgate_out_buffer.resize(CHECK_SZ);
     andgate_left_buffer.resize(CHECK_SZ);
@@ -147,16 +135,15 @@ public:
     pub_label[0] = clear_lsb(pub_label[0]);
     pub_label[1] = clear_lsb(pub_label[1]);
 
-    polyproof = new PolyProof(p, ios_[0], ferret);
+    polyproof = new PolyProof(p, io_, ferret);
   }
 
-  ~ZKBoolBackendBase() override {
+  ~ZKBoolBase() override {
     // ~PolyProof runs batch_check, which still needs the open session.
     delete polyproof;
     if (ferret_is_sender) ferret->rcot_send_end();
     else                  ferret->rcot_recv_end();
     delete ferret;
-    delete pool;
   }
 
   // ---- Helper bit ops -------------------------------------------------
@@ -166,11 +153,15 @@ public:
   static block clear_lsb(block b) {
     return b & makeBlock(0xFFFFFFFFFFFFFFFFULL, 0xFFFFFFFFFFFFFFFEULL);
   }
+  // Branchless: bool → 0 or 1 directly.
   static block with_lsb(block b, bool v) {
-    return clear_lsb(b) ^ makeBlock(0, v ? 1 : 0);
+    return clear_lsb(b) ^ makeBlock(0, static_cast<int64_t>(v));
   }
+  // Branchless: -(int64_t)cond is 0 or all-ones; ANDing delta with that
+  // mask gives delta or zero, which is then XORed unconditionally.
   block xor_delta_if(block b, bool cond) const {
-    return cond ? (b ^ delta) : b;
+    const int64_t m = -static_cast<int64_t>(cond);
+    return b ^ (delta & makeBlock(m, m));
   }
 
   // ---- Backend overrides shared by both sides -------------------------
@@ -188,65 +179,32 @@ public:
 
   // ---- Other shared utilities ----------------------------------------
 
-  uint64_t communication() {
-    uint64_t res = 0;
-    for (int i = 0; i < threads; ++i) res += ios[i]->counter;
-    return res;
-  }
+  uint64_t communication() { return io->counter; }
+  void sync() { io->flush(); }
 
-  void sync() {
-    for (int i = 0; i < threads; ++i) ios[i]->flush();
-  }
-
-  // ---- Threading skeleton for the AND-gate batch correctness check ---
+  // ---- AND-gate batch correctness check (single-threaded) ------------
   //
-  // Common across both sides: derive a Fiat-Shamir seed from the io hash,
-  // partition the check_cnt buffered triples across the worker pool, dispatch
-  // each thread's slice, and then let the role-specific aggregator finalize
-  // the protocol step. The per-thread work and the aggregation are virtual
-  // hooks (see Prv / Ver). Fires once per CHECK_SZ buffered ANDs, so the
-  // virtual-call overhead is negligible.
+  // Derives a Fiat-Shamir seed from the io hash, runs the role-specific
+  // reduction over the check_cnt buffered triples in one pass, then
+  // hands off to the role-specific aggregator that does the network
+  // exchange + compare. Fires once per CHECK_SZ buffered ANDs.
   void andgate_correctness_check_manage() {
     io->flush();
     block seed = io->get_hash_block();
-    std::vector<std::future<void>> fut;
-
-    std::vector<block> share_seed(threads);
-    PRG(&seed).random_block(share_seed.data(), threads);
-
-    // Distribute check_cnt tasks across `threads` workers. Workers
-    // 0..threads-2 get task_base; the last takes whatever's left.
-    // The leftover formula must be defined when task_base == 0
-    // (i.e., check_cnt < threads).
-    uint32_t task_base = check_cnt / threads;
-    uint32_t leftover  = check_cnt - task_base * (threads - 1);
-    uint32_t start = 0;
-    std::vector<block> sum(2 * threads);
-    for (int i = 0; i < threads - 1; ++i) {
-      block *sum_p   = sum.data();
-      block *seeds_p = share_seed.data();
-      fut.push_back(
-          pool->enqueue([this, sum_p, i, start, task_base, seeds_p]() {
-            andgate_correctness_check(sum_p, i, start, task_base, seeds_p[i]);
-          }));
-      start += task_base;
-    }
-    andgate_correctness_check(sum.data(), threads - 1, start, leftover,
-                              share_seed[threads - 1]);
-    for (auto &f : fut) f.get();
-
-    andgate_correctness_aggregate(sum.data());
-
+    // ALICE writes (A0, A1) into sum[0..1]; BOB writes B into sum[0].
+    block sum[2] = { zero_block, zero_block };
+    andgate_correctness_check(sum, check_cnt, seed);
+    andgate_correctness_aggregate(sum);
     io->flush();
   }
 
-  // Per-thread reduction over the check_cnt buffered triples.
-  // ALICE collects the Δ⁰ and Δ¹ coefficients into ret[2*thr_i], ret[2*thr_i+1].
-  // BOB collects ALICE's polynomial under his Δ into ret[thr_i].
-  virtual void andgate_correctness_check(block *ret, int thr_i, uint32_t start,
-                                          uint32_t task_n, block chi_seed) = 0;
+  // Reduction over the buffered triples. ALICE writes the (Δ⁰, Δ¹)
+  // coefficients into ret[0..1]; BOB writes its check polynomial into
+  // ret[0].
+  virtual void andgate_correctness_check(block *ret, uint32_t task_n,
+                                         block chi_seed) = 0;
 
-  // Trailing role-specific aggregation: ALICE packs+sends `A_star`,
+  // Trailing role-specific aggregation: ALICE packs + sends `A_star`,
   // BOB receives and verifies with cmpBlock.
   virtual void andgate_correctness_aggregate(block *sum) = 0;
 };
@@ -254,13 +212,13 @@ public:
 // Cross-module accessors. edabit / arith / ram-zk reach into the bool
 // backend for state and helpers — the cast asserts in debug if the
 // global `backend` isn't actually one of ours.
-inline ZKBoolBackendBase *get_bool_backend() {
-  return static_cast<ZKBoolBackendBase *>(backend);
+inline ZKBoolBase *get_bool_backend() {
+  return static_cast<ZKBoolBase *>(backend);
 }
 
 } // namespace emp
 
-#include "emp-zk/emp-zk-bool/zk_bool_backend_prv.h"
-#include "emp-zk/emp-zk-bool/zk_bool_backend_ver.h"
+#include "emp-zk/emp-zk-bool/zk_bool_prover.h"
+#include "emp-zk/emp-zk-bool/zk_bool_verifier.h"
 
 #endif

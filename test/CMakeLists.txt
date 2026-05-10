@@ -22,7 +22,6 @@ endfunction()
 
 # Boolean ZK
 add_test_case_with_run(bool example)
-add_test_case_with_run(bool ostriple)
 add_test_case_with_run(bool bool_io)
 add_test_case_with_run(bool memory_scalability)
 add_test_case_with_run(bool input_scalability)
@@ -30,7 +29,6 @@ add_test_case_with_run(bool circuit_scalability)
 add_test_case_with_run(bool sha256)
 add_test_case_with_run(bool polynomial)
 add_test_case_with_run(bool inner_prdt)
-add_test_case_with_run(bool lowmc)
 
 # Arithmetic ZK
 add_test_case_with_run(arith abconversion)
@@ -51,6 +49,6 @@ add_test_case_with_run(vole lpn)
 add_test_case_with_run(vole vole_f2k_triple)
 
 # RAM ZK
-add_test_case_with_run(ram ram_test)
-add_test_case_with_run(ram ram_ext_test)
-add_test_case_with_run(ram ro_ram_test)
+add_test_case_with_run(ram-zk ram_test)
+add_test_case_with_run(ram-zk ram_ext_test)
+add_test_case_with_run(ram-zk ro_ram_test)

@@ -23,7 +23,7 @@ public:
   IO **ios;
   __uint128_t secret_share_x;
   __uint128_t **ggm_tree;
-  __uint128_t *check_chialpha_buf = nullptr, *check_VW_buf = nullptr;
+  std::vector<__uint128_t> check_chialpha_buf, check_VW_buf;
   __uint128_t *triple_yz;
   ThreadPool *pool;
   std::vector<uint32_t> item_pos_recver;
@@ -49,16 +49,11 @@ public:
         (__uint128_t **)malloc(this->item_n * sizeof(__uint128_t *));
 
     if (party == BOB)
-      check_chialpha_buf = new __uint128_t[item_n];
-    check_VW_buf = new __uint128_t[item_n];
+      check_chialpha_buf.resize(item_n);
+    check_VW_buf.resize(item_n);
   }
 
-  ~MpfssRegFp() {
-    free(ggm_tree);
-    if (check_chialpha_buf != nullptr)
-      delete[] check_chialpha_buf;
-    delete[] check_VW_buf;
-  }
+  ~MpfssRegFp() { free(ggm_tree); }
 
   void set_malicious() { is_malicious = true; }
 
@@ -89,7 +84,7 @@ public:
         ot->choices_sender();
       } else {
         recvers.push_back(new SpfssRecverFp<IO>(netio, tree_height));
-        ot->choices_recver(recvers[i]->b);
+        ot->choices_recver(recvers[i]->b.get());
         item_pos_recver[i] = recvers[i]->get_index();
       }
     }
@@ -136,21 +131,22 @@ public:
       f.get();
 
     if (is_malicious) {
-      block *seed = new block[threads];
-      seed_expand(seed, threads);
+      std::vector<block> seed(threads);
+      seed_expand(seed.data(), threads);
       std::vector<std::future<void>> fut;
+      block *seed_p = seed.data();
       uint32_t start = 0, end = width;
       for (int i = 0; i < threads - 1; ++i) {
         fut.push_back(
-            pool->enqueue([this, start, end, width, senders, recvers, seed]() {
+            pool->enqueue([this, start, end, width, senders, recvers, seed_p]() {
               for (auto i = start; i < end; ++i) {
                 if (party == ALICE) {
                   senders[i]->consistency_check_msg_gen(
-                      check_VW_buf[i], ios[start / width], seed[start / width]);
+                      check_VW_buf[i], ios[start / width], seed_p[start / width]);
                 } else {
                   recvers[i]->consistency_check_msg_gen(
                       check_chialpha_buf[i], check_VW_buf[i],
-                      ios[start / width], triple_yz[i], seed[start / width]);
+                      ios[start / width], triple_yz[i], seed_p[start / width]);
                 }
               }
             }));
@@ -170,7 +166,6 @@ public:
       }
       for (auto &f : fut)
         f.get();
-      delete[] seed;
     }
 
     if (is_malicious) {
@@ -252,9 +247,9 @@ public:
   void check_correctness(IO *io2, __uint128_t *vector, __uint128_t beta,
                          __uint128_t delta2, int pos, __uint128_t x,
                          __uint128_t z) {
-    __uint128_t *sendervec = new __uint128_t[leave_n];
+    std::vector<__uint128_t> sendervec(leave_n);
     __uint128_t gamma, delta, y;
-    io2->recv_data(sendervec, leave_n * sizeof(__uint128_t));
+    io2->recv_data(sendervec.data(), leave_n * sizeof(__uint128_t));
     io2->recv_data(&gamma, sizeof(__uint128_t));
     io2->recv_data(&delta, sizeof(__uint128_t));
     __uint128_t delta3 = delta;

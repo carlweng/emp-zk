@@ -35,7 +35,6 @@ find_package(emp-ot 1.0 REQUIRED)
 # Library target
 # ---------------------------------------------------------------------
 add_library(emp-zk STATIC
-    emp-zk/emp-zk-bool/emp-zk-bool.cpp
     emp-zk/emp-zk-arith/emp-zk-arith.cpp)
 add_library(emp-zk::emp-zk ALIAS emp-zk)
 

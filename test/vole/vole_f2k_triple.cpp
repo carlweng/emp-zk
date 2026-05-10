@@ -48,10 +48,18 @@ void test_vole_triple(
   NetIO **ios, 
   BoolIO **ios_bool,
   int party) {
-  // instantiate OT (FerretCOT is no longer templated on IO; takes
-  // a polymorphic IOChannel** at construction)
+  // FerretCOT post-unification takes a single IOChannel*; threading for
+  // the rest of the protocol still happens through ios_bool[1..].
   FerretCOT ferretcot(
-    3 - party, threads, reinterpret_cast<IOChannel **>(ios_bool), true);
+    3 - party, reinterpret_cast<IOChannel *>(ios_bool[0]), /*malicious=*/true, /*run_setup=*/true);
+
+  // SVoleF2k / BaseSVoleF2k pull from the streaming ferret session
+  // via rcot_*_next; open it explicitly here (in the bool backend
+  // this is implicit ctor->dtor). ferret was built with party=3-party,
+  // so ferret is the OT-sender when this test side is BOB.
+  const bool sender = (party == BOB);
+  if (sender) ferretcot.rcot_send_begin();
+  else        ferretcot.rcot_recv_begin();
 
   // instantiate F2K VOLE
   SVoleF2k<BoolIO> vtriple(
@@ -62,7 +70,7 @@ void test_vole_triple(
   auto start = clock_start();
   vtriple.setup(Delta);
   std::cout << "setup " << time_from(start) / 1000 << " ms" << std::endl;
-  check_triple(Delta, vtriple.pre_x, vtriple.pre_yz, vtriple.param.n_pre, ios[0]);
+  check_triple(Delta, vtriple.pre_x.data(), vtriple.pre_yz.data(), vtriple.param.n_pre, ios[0]);
 
   std::size_t triple_need = vtriple.ot_limit;
   std::size_t buf_sz = vtriple.param.n;
@@ -76,6 +84,9 @@ void test_vole_triple(
   }
   delete[] buf_x;
   delete[] buf_yz;
+
+  if (sender) ferretcot.rcot_send_end();
+  else        ferretcot.rcot_recv_end();
 
 #if defined(__linux__)
   struct rusage rusage;

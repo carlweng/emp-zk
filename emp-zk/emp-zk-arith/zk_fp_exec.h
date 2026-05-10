@@ -3,7 +3,7 @@
 
 #include "emp-zk/emp-vole/emp-vole.h"
 #include "emp-zk/emp-zk-arith/ostriple.h"
-#include "emp-zk/edabit/edabits.h"
+#include "emp-zk/emp-zk-arith/edabit/edabits.h"
 
 class ZKFpExec {
 public:

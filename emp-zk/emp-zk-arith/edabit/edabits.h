@@ -5,7 +5,7 @@
 
 #include "emp-ot/emp-ot.h"
 #include "emp-tool/emp-tool.h"
-#include "emp-zk/edabit/auth_helper.h"
+#include "emp-zk/emp-zk-arith/edabit/doub_auth_helper.h"
 #include "emp-zk/emp-vole/emp-vole.h"
 #include "emp-zk/emp-zk-bool/emp-zk-bool.h"
 
@@ -16,9 +16,9 @@ public:
   IO **ios;
 
   block delta_f2;
-  Integer *bool_candidate = nullptr;
+  std::vector<Integer> bool_candidate;
   __uint128_t delta_fp;
-  __uint128_t *arith_candidate = nullptr;
+  std::vector<__uint128_t> arith_candidate;
 
   VoleTriple<IO> *cot_fp = nullptr;
 
@@ -50,13 +50,13 @@ public:
     this->edabit_offset = 0;
     this->rand_pt = 0;
     this->edabit_num = 0;
-    arith_candidate = new __uint128_t[cot_fp->param.n];
-    cot_fp->extend_inplace(arith_candidate, cot_fp->param.n); // check the size
+    arith_candidate.resize(cot_fp->param.n);
+    cot_fp->extend_inplace(arith_candidate.data(), cot_fp->param.n); // check the size
 
     this->ell = B * N + C; // batch size
     this->ell_faulty = ell - N;
     this->Bm1 = B - 1;
-    bool_candidate = new Integer[ell];
+    bool_candidate.resize(ell);
 
     auth_helper = new DoubAuthHelper<IO>(party, ios[0]);
 
@@ -68,10 +68,6 @@ public:
   ~EdaBits() {
     if (!auth_helper->triple_equality_check())
       error("cut and choose fails");
-    if (bool_candidate != nullptr)
-      delete[] bool_candidate;
-    if (arith_candidate != nullptr)
-      delete[] arith_candidate;
     if (auth_helper != nullptr)
       delete auth_helper;
   }
@@ -85,7 +81,7 @@ public:
     // auto start = clock_start();
     //  If the buffer is used up, refill the Fp shares
     if (np_pt + ell > np_sz) {
-      cot_fp->extend_inplace(arith_candidate, cot_fp->param.n);
+      cot_fp->extend_inplace(arith_candidate.data(), cot_fp->param.n);
       np_pt = 0;
     }
     np_rg = np_pt + ell;
@@ -99,24 +95,24 @@ public:
       for (uint32_t i = 0; i < ell; ++i)
         bool_candidate[i] = Integer(62, 0, ALICE);
     }
-    get_bool_backend()->ostriple->io->flush();
+    get_bool_backend()->io->flush();
 
     // Generate a random point to do the permutation
     rand_pt = random_point(ell_faulty);
 
     // Open S_o TODO overflow
     if (party == ALICE)
-      auth_helper->open_check_send(bool_candidate + N + rand_pt,
-                                   arith_candidate + np_pt + N + rand_pt, C);
+      auth_helper->open_check_send(bool_candidate.data() + N + rand_pt,
+                                   arith_candidate.data() + np_pt + N + rand_pt, C);
     else
-      auth_helper->open_check_recv(bool_candidate + N + rand_pt,
-                                   arith_candidate + np_pt + N + rand_pt, C);
+      auth_helper->open_check_recv(bool_candidate.data() + N + rand_pt,
+                                   arith_candidate.data() + np_pt + N + rand_pt, C);
 
     // bucketing
     uint32_t buc_start = fp_index(np_pt + N + rand_pt + C);
     uint32_t buc_start1 = f2_index(rand_pt + N + C);
-    __uint128_t *fp_to_check = new __uint128_t[N];
-    Integer *f2_to_check = new Integer[N];
+    std::vector<__uint128_t> fp_to_check(N);
+    std::vector<Integer> f2_to_check(N);
     for (uint32_t j = 0; j < Bm1; ++j) { // TODO parameter
       uint32_t ifp0 = np_pt;
       uint32_t ifp1 = fp_index(buc_start + j);
@@ -132,18 +128,16 @@ public:
         // TODO boolean addition and selection costs a lot, and it should be
         // subtraction
       }
-      emp::get_bool_backend()->ostriple->io->flush();
+      emp::get_bool_backend()->io->flush();
       if (party == ALICE)
-        auth_helper->open_check_send(f2_to_check, fp_to_check, N);
+        auth_helper->open_check_send(f2_to_check.data(), fp_to_check.data(), N);
       else
-        auth_helper->open_check_recv(f2_to_check, fp_to_check, N);
+        auth_helper->open_check_recv(f2_to_check.data(), fp_to_check.data(), N);
     }
     if (!auth_helper->triple_equality_check())
       error("cut and choose fails");
     edabit_num = N;
     edabit_offset = 0;
-    delete[] fp_to_check;
-    delete[] f2_to_check;
     // std::cout << "edabits generation: " << time_from(start)/N << "
     // us/edabits" << std::endl;
   }
@@ -175,9 +169,9 @@ public:
       int num = static_cast<int>(std::min(len - off, avail));
 
       uint32_t edab_f2;
-      uint32_t *edab_fp = new uint32_t[num];
-      uint64_t *diff = new uint64_t[num];
-      Integer *diff_bool = new Integer[num];
+      std::vector<uint32_t> edab_fp(num);
+      std::vector<uint64_t> diff(num);
+      std::vector<Integer> diff_bool(num);
       for (int i = 0; i < num; ++i) {
         next_edabits(edab_f2, edab_fp[i]);
         diff_bool[i] = in[off + i] - bool_candidate[edab_f2];
@@ -185,15 +179,12 @@ public:
                                            diff_bool[i] + int_boo_pr);
       }
       if (party == ALICE)
-        auth_helper->open_check_send(diff, diff_bool, num);
+        auth_helper->open_check_send(diff.data(), diff_bool.data(), num);
       else
-        auth_helper->open_check_recv(diff, diff_bool, num);
+        auth_helper->open_check_recv(diff.data(), diff_bool.data(), num);
       ios[0]->flush();
       for (int i = 0; i < num; ++i)
         out[off + i] = intfp_add_const(arith_candidate[edab_fp[i]], diff[i]);
-      delete[] edab_fp;
-      delete[] diff;
-      delete[] diff_bool;
       off += num;
     }
   }
@@ -222,17 +213,17 @@ public:
       int num = static_cast<int>(std::min(len - off, avail));
 
       uint32_t edab_fp;
-      uint32_t *edab_f2 = new uint32_t[num];
-      __uint128_t *sum_fp = new __uint128_t[num];
-      uint64_t *sum = new uint64_t[num];
+      std::vector<uint32_t> edab_f2(num);
+      std::vector<__uint128_t> sum_fp(num);
+      std::vector<uint64_t> sum(num);
       for (int i = 0; i < num; ++i) {
         next_edabits(edab_f2[i], edab_fp);
         sum_fp[i] = intfp_add(arith_candidate[edab_fp], in[off + i]);
       }
       if (party == ALICE)
-        auth_helper->open_check_send(sum, sum_fp, num);
+        auth_helper->open_check_send(sum.data(), sum_fp.data(), num);
       else
-        auth_helper->open_check_recv(sum, sum_fp, num);
+        auth_helper->open_check_recv(sum.data(), sum_fp.data(), num);
       ios[0]->flush();
       for (int i = 0; i < num; ++i) {
         Integer sum_boo = Integer(62, sum[i], PUBLIC);
@@ -240,9 +231,6 @@ public:
         out[off + i] =
             sum_boo.select(sum_boo.bits[61], sum_boo + int_boo_pr);
       }
-      delete[] edab_f2;
-      delete[] sum_fp;
-      delete[] sum;
       off += num;
     }
   }

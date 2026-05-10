@@ -45,9 +45,7 @@ void test_polynomial(BoolIO *ios[threads], int party) {
     zkp_poly_deg2(x, x + sz, coeff, sz);
   }
 
-  bool cheated = finalize_zk_bool();
-  if (cheated)
-    error("cheated\n");
+  finalize_zk_bool();
 
   double tt = time_from(start);
   cout << "prove " << repeat << " degree-2 polynomial of length " << sz << endl;

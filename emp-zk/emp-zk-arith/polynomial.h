@@ -12,8 +12,8 @@ public:
   IO *io;
   uint64_t delta;
   int buffer_sz = 1024;
-  uint64_t *buffer = nullptr;
-  uint64_t *buffer1 = nullptr;
+  std::vector<uint64_t> buffer;
+  std::vector<uint64_t> buffer1;
   FpOSTriple<IO> *ostriple;
   int num;
 
@@ -21,39 +21,32 @@ public:
     this->party = party;
     this->io = io;
     this->ostriple = ostriple;
+    buffer.resize(buffer_sz);
     if (party == ALICE) {
-      buffer = new uint64_t[buffer_sz];
-      buffer1 = new uint64_t[buffer_sz];
+      buffer1.resize(buffer_sz);
     } else {
-      buffer = new uint64_t[buffer_sz];
       this->delta = LOW64(ostriple->delta);
     }
     num = 0;
   }
 
-  ~FpPolyProof() {
-    batch_check();
-    if (buffer != nullptr)
-      delete[] buffer;
-    if (buffer1 != nullptr)
-      delete[] buffer1;
-  }
+  ~FpPolyProof() { batch_check(); }
 
   void batch_check() {
     if (num == 0)
       return;
     uint64_t seed;
     io->flush();
-    uint64_t *chi = new uint64_t[num];
+    std::vector<uint64_t> chi(num);
     __uint128_t ope_data;
     uint64_t check_sum[2];
     if (party == ALICE) {
       io->recv_data(&seed, sizeof(uint64_t));
 
-      uni_hash_coeff_gen(chi, seed, num);
+      uni_hash_coeff_gen(chi.data(), seed, num);
 
-      check_sum[0] = vector_inn_prdt_sum_red(chi, buffer, num);
-      check_sum[1] = vector_inn_prdt_sum_red(chi, buffer1, num);
+      check_sum[0] = vector_inn_prdt_sum_red(chi.data(), buffer.data(), num);
+      check_sum[1] = vector_inn_prdt_sum_red(chi.data(), buffer1.data(), num);
       ostriple->vole->extend(&ope_data, 1);
 
       check_sum[0] = add_mod(check_sum[0], LOW64(ope_data));
@@ -65,8 +58,8 @@ public:
       seed = mod(seed);
       io->send_data(&seed, sizeof(uint64_t));
 
-      uni_hash_coeff_gen(chi, seed, num);
-      uint64_t B = vector_inn_prdt_sum_red(chi, buffer, num);
+      uni_hash_coeff_gen(chi.data(), seed, num);
+      uint64_t B = vector_inn_prdt_sum_red(chi.data(), buffer.data(), num);
       ostriple->vole->extend(&ope_data, 1);
       B = add_mod(B, LOW64(ope_data));
       io->recv_data(check_sum, 2 * sizeof(uint64_t));
@@ -74,10 +67,9 @@ public:
       uint64_t tmp = mult_mod(check_sum[1], delta);
       tmp = add_mod(B, tmp);
       if (tmp != check_sum[0])
-        CheatRecord::put("polynomial zkp fails");
+        error("polynomial zkp fails");
     }
     num = 0;
-    delete[] chi;
   }
 
   inline void zkp_poly_deg2(const __uint128_t *polyx, const __uint128_t *polyy,

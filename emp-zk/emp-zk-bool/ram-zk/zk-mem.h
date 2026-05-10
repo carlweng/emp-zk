@@ -1,8 +1,8 @@
 #ifndef ZK_RAM_H__
 #define ZK_RAM_H__
 #include "emp-zk/emp-zk-bool/zk_bool_backend.h"
-#include "emp-zk/extensions/ram-zk/gf_base.h"
-#include "emp-zk/extensions/ram-zk/ostriple.h"
+#include "emp-zk/emp-zk-bool/ram-zk/gf_base.h"
+#include "emp-zk/emp-zk-bool/ram-zk/ostriple.h"
 
 template <typename IO> class ZKRAM {
 public:
@@ -22,11 +22,11 @@ public:
     capacity = (capacity << index_sz);
     mem.resize(capacity);
     auto *exec = emp::get_bool_backend();
-    io = exec->ostriple->io;
-    Delta = exec->ostriple->delta;
+    io = exec->io;
+    Delta = exec->delta;
     ostriple =
-        new F2kOSTriple<IO>(party, exec->ostriple->threads, exec->ostriple->ios,
-                            exec->ostriple->ferret, exec->ostriple->pool);
+        new F2kOSTriple<IO>(party, exec->threads, exec->ios,
+                            exec->ferret, exec->pool);
   }
 
   ~ZKRAM() { delete ostriple; }

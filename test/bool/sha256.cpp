@@ -53,9 +53,7 @@ int main(int argc, char **argv) {
       error("wrong");
   }
 
-  bool cheated = finalize_zk_bool();
-  if (cheated)
-    error("cheated\n");
+  finalize_zk_bool();
 
   destroy_bool_ios(ios);
 

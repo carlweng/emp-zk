@@ -35,9 +35,7 @@ void test_circuit_zk(BoolIO *ios[threads], int party, int log_trial) {
         a[i][j] = Integer(32, j, ALICE);
     }
     a[0][0][0].reveal<bool>(PUBLIC);
-    bool cheated = finalize_zk_bool();
-    if (cheated)
-      error("cheated\n");
+    finalize_zk_bool();
     double timeused = time_from(start);
     cout << input_sz << "\t" << timeused << endl;
     for (int i = 0; i < 8; ++i)

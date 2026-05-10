@@ -8,21 +8,17 @@ namespace emp {
 
 template <typename IO> class SpfssF2kRecv {
 public:
-  block *ggm_tree, *m;
-  bool *b;
+  block *ggm_tree;
+  std::vector<block> m;
+  std::unique_ptr<bool[]> b;
   IO *io;
   int choice_pos, depth, leave_n;
   block share;
 
   SpfssF2kRecv(IO *io, int depth_in) : io(io), depth(depth_in) {
     this->leave_n = 1 << (depth_in - 1);
-    m = new block[depth - 1];
-    b = new bool[depth - 1];
-  }
-
-  ~SpfssF2kRecv() {
-    delete[] m;
-    delete[] b;
+    m.resize(depth - 1);
+    b.reset(new bool[depth - 1]);
   }
 
   int get_index() {
@@ -38,7 +34,7 @@ public:
   // receive the message and reconstruct the tree
   // j: position of the secret, begins from 0
   template <typename OT> void recv(OT *ot, IO *io2, int s) {
-    ot->recv(m, b, depth - 1, io2, s);
+    ot->recv(m.data(), b.get(), depth - 1, io2, s);
     io2->recv_data(&share, sizeof(block));
   }
 
@@ -46,7 +42,7 @@ public:
   // j: position of the secret, begins from 0
   void compute(block *ggm_tree_mem, block delta2) {
     this->ggm_tree = ggm_tree_mem;
-    ggm_tree_reconstruction(b, m);
+    ggm_tree_reconstruction(b.get(), m.data());
 
     ggm_tree[choice_pos] = zero_block;
     block nodes_sum = zero_block;
@@ -88,17 +84,15 @@ public:
 
   void consistency_check_msg_gen(block &chi_alpha, block &W, IO *io2) {
     block seed = io2->get_hash_block(); // TODO Fiat-Shamir
-    block *chi = new block[leave_n];
+    std::vector<block> chi(leave_n);
     Hash hash;
     block digest = hash.hash_for_block(&seed, sizeof(block));
-    uni_hash_coeff_gen(chi, digest, leave_n);
+    uni_hash_coeff_gen(chi.data(), digest, leave_n);
 
     chi_alpha = chi[choice_pos];
 
     // W = \sum{chi_i*w_i}
-    vector_inn_prdt_sum_red(&W, chi, ggm_tree, leave_n);
-
-    delete[] chi;
+    vector_inn_prdt_sum_red(&W, chi.data(), ggm_tree, leave_n);
   }
 };
 } // namespace emp

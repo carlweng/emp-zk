@@ -23,7 +23,7 @@ public:
   IO **ios;
   block secret_share_x;
   block **ggm_tree;
-  block *check_chialpha_buf = nullptr, *check_VW_buf = nullptr;
+  std::vector<block> check_chialpha_buf, check_VW_buf;
   block *triple_yz = nullptr, *triple_x = nullptr;
   ThreadPool *pool;
   std::vector<uint32_t> item_pos_recver;
@@ -48,16 +48,11 @@ public:
     this->ggm_tree = (block **)malloc(this->item_n * sizeof(block *));
 
     if (party == BOB)
-      check_chialpha_buf = new block[item_n];
-    check_VW_buf = new block[item_n];
+      check_chialpha_buf.resize(item_n);
+    check_VW_buf.resize(item_n);
   }
 
-  ~MpfssRegF2k() {
-    free(ggm_tree);
-    if (check_chialpha_buf != nullptr)
-      delete[] check_chialpha_buf;
-    delete[] check_VW_buf;
-  }
+  ~MpfssRegF2k() { free(ggm_tree); }
 
   void set_malicious() { is_malicious = true; }
 
@@ -98,7 +93,7 @@ public:
         ot->choices_sender();
       } else {
         recvers.push_back(new SpfssF2kRecv<IO>(netio, tree_height));
-        ot->choices_recver(recvers[i]->b);
+        ot->choices_recver(recvers[i]->b.get());
         item_pos_recver[i] = recvers[i]->get_index();
       }
     }

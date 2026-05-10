@@ -15,9 +15,9 @@ public:
   __uint128_t delta;
 
   int check_cnt = 0;
-  __uint128_t *andgate_out_buffer = nullptr;
-  __uint128_t *andgate_left_buffer = nullptr;
-  __uint128_t *andgate_right_buffer = nullptr;
+  std::vector<__uint128_t> andgate_out_buffer;
+  std::vector<__uint128_t> andgate_left_buffer;
+  std::vector<__uint128_t> andgate_right_buffer;
 
   IO *io;
   IO **ios;
@@ -36,9 +36,9 @@ public:
     pool = new ThreadPool(threads);
     vole = new VoleTriple<IO>(3 - party, threads, ios);
 
-    andgate_out_buffer = new __uint128_t[CHECK_SZ];
-    andgate_left_buffer = new __uint128_t[CHECK_SZ];
-    andgate_right_buffer = new __uint128_t[CHECK_SZ];
+    andgate_out_buffer.resize(CHECK_SZ);
+    andgate_left_buffer.resize(CHECK_SZ);
+    andgate_right_buffer.resize(CHECK_SZ);
     if (party == ALICE) {
       vole->setup();
     } else {
@@ -57,9 +57,6 @@ public:
     auth_helper->flush();
     delete auth_helper;
     delete vole;
-    delete[] andgate_out_buffer;
-    delete[] andgate_left_buffer;
-    delete[] andgate_right_buffer;
   }
   /* ---------------------inputs----------------------*/
 
@@ -77,7 +74,7 @@ public:
   }
 
   void authenticated_val_input(__uint128_t *label, const uint64_t *w, int len) {
-    uint64_t *lam = new uint64_t[len];
+    std::vector<uint64_t> lam(len);
     vole->extend(label, len);
 
     for (int i = 0; i < len; ++i) {
@@ -85,8 +82,7 @@ public:
       lam[i] = add_mod(HIGH64(label[i]), lam[i]);
       label[i] = (__uint128_t)makeBlock(w[i], LOW64(label[i]));
     }
-    io->send_data(lam, len * sizeof(uint64_t));
-    delete[] lam;
+    io->send_data(lam.data(), len * sizeof(uint64_t));
   }
 
   __uint128_t authenticated_val_input() {
@@ -103,17 +99,15 @@ public:
   }
 
   void authenticated_val_input(__uint128_t *label, int len) {
-    uint64_t *lam = new uint64_t[len];
+    std::vector<uint64_t> lam(len);
     vole->extend(label, len);
 
-    io->recv_data(lam, len * sizeof(uint64_t));
+    io->recv_data(lam.data(), len * sizeof(uint64_t));
 
     for (int i = 0; i < len; ++i) {
       lam[i] = mult_mod(lam[i], delta);
       label[i] = add_mod(label[i], lam[i]);
     }
-
-    delete[] lam;
   }
 
   /*
@@ -182,29 +176,30 @@ public:
       } else
         W = sum[0];
     } else {
-      block *share_seed = new block[threads];
-      share_seed_gen(share_seed, threads);
+      std::vector<block> share_seed(threads);
+      share_seed_gen(share_seed.data(), threads);
       io->flush();
 
       uint32_t task_base = check_cnt / threads;
       uint32_t leftover = task_base + (check_cnt % task_base);
       uint32_t start = 0;
 
-      uint64_t *sum = new uint64_t[2 * threads];
+      std::vector<uint64_t> sum(2 * threads);
+      uint64_t *sum_p = sum.data();
+      block *seeds_p = share_seed.data();
 
       for (int i = 0; i < threads - 1; ++i) {
         fut.push_back(
-            pool->enqueue([this, sum, i, start, task_base, share_seed]() {
-              andgate_correctness_check(sum, i, start, task_base, share_seed);
+            pool->enqueue([this, sum_p, i, start, task_base, seeds_p]() {
+              andgate_correctness_check(sum_p, i, start, task_base, seeds_p);
             }));
         start += task_base;
       }
-      andgate_correctness_check(sum, threads - 1, start, leftover, share_seed);
+      andgate_correctness_check(sum_p, threads - 1, start, leftover, seeds_p);
 
       for (auto &f : fut)
         f.get();
 
-      delete[] share_seed;
       if (party == ALICE) {
         for (int i = 0; i < threads; ++i) {
           U = add_mod(U, sum[2 * i]);
@@ -244,13 +239,13 @@ public:
                                  uint32_t task_n, block *chi_seed) {
     if (task_n == 0)
       return;
-    __uint128_t *left = andgate_left_buffer;
-    __uint128_t *right = andgate_right_buffer;
-    __uint128_t *gateout = andgate_out_buffer;
+    __uint128_t *left = andgate_left_buffer.data();
+    __uint128_t *right = andgate_right_buffer.data();
+    __uint128_t *gateout = andgate_out_buffer.data();
 
-    uint64_t *chi = new uint64_t[task_n];
+    std::vector<uint64_t> chi(task_n);
     uint64_t seed = mod(LOW64(chi_seed[thr_idx]));
-    uni_hash_coeff_gen(chi, seed, task_n);
+    uni_hash_coeff_gen(chi.data(), seed, task_n);
     if (party == ALICE) {
       uint64_t A0, A1;
       uint64_t U = 0, V = 0;
@@ -283,8 +278,6 @@ public:
       }
       ret[thr_idx] = W;
     }
-
-    delete[] chi;
   }
 
   /*
@@ -311,18 +304,15 @@ public:
 
   void reveal_check_send(const __uint128_t *output, const uint64_t *value,
                          int len) {
-    uint64_t *val_real = new uint64_t[len];
-    reveal_send(output, val_real, len);
-    delete[] val_real;
+    std::vector<uint64_t> val_real(len);
+    reveal_send(output, val_real.data(), len);
   }
 
   void reveal_check_recv(const __uint128_t *output, const uint64_t *val_exp,
                          int len) {
-    uint64_t *val_real = new uint64_t[len];
-    reveal_recv(output, val_real, len);
-    bool res = memcmp(val_exp, val_real, len * sizeof(uint64_t));
-    delete[] val_real;
-    if (res != 0)
+    std::vector<uint64_t> val_real(len);
+    reveal_recv(output, val_real.data(), len);
+    if (memcmp(val_exp, val_real.data(), len * sizeof(uint64_t)) != 0)
       error("arithmetic reveal value not expected");
   }
 
@@ -477,8 +467,8 @@ public:
     if (party == ALICE) {
       io->send_data(auth, len * sizeof(__uint128_t));
     } else {
-      __uint128_t *auth_recv = new __uint128_t[len];
-      io->recv_data(auth_recv, len * sizeof(__uint128_t));
+      std::vector<__uint128_t> auth_recv(len);
+      io->recv_data(auth_recv.data(), len * sizeof(__uint128_t));
       for (int i = 0; i < len; ++i) {
         __uint128_t mac = mod((auth_recv[i] >> 64) * delta, pr);
         mac = mod(mac + auth[i], pr);
@@ -487,7 +477,6 @@ public:
           abort();
         }
       }
-      delete[] auth_recv;
     }
   }
 
@@ -498,12 +487,10 @@ public:
       io->send_data(b, len * sizeof(__uint128_t));
       io->send_data(c, len * sizeof(__uint128_t));
     } else {
-      __uint128_t *ar = new __uint128_t[len];
-      __uint128_t *br = new __uint128_t[len];
-      __uint128_t *cr = new __uint128_t[len];
-      io->recv_data(ar, len * sizeof(__uint128_t));
-      io->recv_data(br, len * sizeof(__uint128_t));
-      io->recv_data(cr, len * sizeof(__uint128_t));
+      std::vector<__uint128_t> ar(len), br(len), cr(len);
+      io->recv_data(ar.data(), len * sizeof(__uint128_t));
+      io->recv_data(br.data(), len * sizeof(__uint128_t));
+      io->recv_data(cr.data(), len * sizeof(__uint128_t));
       for (int i = 0; i < len; ++i) {
         __uint128_t product = mod((ar[i] >> 64) * (br[i] >> 64), pr);
         if (product != (cr[i] >> 64))
@@ -513,9 +500,6 @@ public:
         if (mac != (cr[i] & (__uint128_t)0xFFFFFFFFFFFFFFFFLL))
           error("wrong mac");
       }
-      delete[] ar;
-      delete[] br;
-      delete[] cr;
     }
   }
 };

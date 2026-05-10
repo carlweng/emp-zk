@@ -14,9 +14,7 @@ void test_circuit_zk(BoolIO *ios[threads], int party) {
   Integer b(32, 2, ALICE);
   cout << (a - b).reveal<uint32_t>(PUBLIC) << endl;
 
-  bool cheat = finalize_zk_bool();
-  if (cheat)
-    error("cheat!\n");
+  finalize_zk_bool();
 }
 
 int main(int argc, char **argv) {

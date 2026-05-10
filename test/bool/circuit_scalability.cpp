@@ -28,9 +28,7 @@ void test_circuit_zk(BoolIO *ios[threads], int party, int input_sz_lg) {
   }
   Bit ret = Bit(false, PUBLIC);
   bool ret_b = ret.reveal<bool>(PUBLIC);
-  bool cheated = finalize_zk_bool();
-  if (cheated)
-    error("cheated\n");
+  finalize_zk_bool();
   cout << 100 * input_sz << "\t" << time_from(start) << " " << party << endl;
   cout << ret_b << std::endl;
 }

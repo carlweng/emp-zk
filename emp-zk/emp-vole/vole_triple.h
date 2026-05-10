@@ -43,10 +43,10 @@ public:
   bool is_malicious;
   bool extend_initialized;
   bool pre_ot_inplace;
-  __uint128_t *pre_yz = nullptr;
-  __uint128_t *pre_x = nullptr;
-  __uint128_t *vole_triples = nullptr;
-  __uint128_t *vole_x = nullptr;
+  std::vector<__uint128_t> pre_yz;
+  std::vector<__uint128_t> pre_x;
+  std::vector<__uint128_t> vole_triples;
+  std::vector<__uint128_t> vole_x;
 
   BaseCot<IO> *cot;
   OTPre<IO> *pre_ot = nullptr;
@@ -72,10 +72,6 @@ public:
   }
 
   ~VoleTriple() {
-    if (pre_yz != nullptr)
-      delete[] pre_yz;
-    if (pre_x != nullptr)
-      delete[] pre_x;
     if (pre_ot != nullptr)
       delete pre_ot;
     if (lpn != nullptr)
@@ -84,10 +80,6 @@ public:
       delete pool;
     if (mpfss != nullptr)
       delete mpfss;
-    if (vole_triples != nullptr)
-      delete[] vole_triples;
-    if (vole_x != nullptr)
-      delete[] vole_x;
     if (cot != nullptr)
       delete cot;
   }
@@ -137,12 +129,11 @@ public:
 
   void extend(__uint128_t *buffer) {
     cot->cot_gen(pre_ot, pre_ot->n);
-    // memset(buffer, 0, n*sizeof(__uint128_t));
     if (party == ALICE)
-      extend_send(buffer, mpfss, pre_ot, lpn, pre_yz);
+      extend_send(buffer, mpfss, pre_ot, lpn, pre_yz.data());
     else
-      extend_recv(buffer, mpfss, pre_ot, lpn, pre_yz);
-    memcpy(pre_yz, buffer + ot_limit, M * sizeof(__uint128_t));
+      extend_recv(buffer, mpfss, pre_ot, lpn, pre_yz.data());
+    memcpy(pre_yz.data(), buffer + ot_limit, M * sizeof(__uint128_t));
   }
 
   void setup() {
@@ -151,8 +142,7 @@ public:
     auto fut = pool_tmp.enqueue([this]() { extend_initialization(); });
 
     // space for pre-processing triples
-    __uint128_t *pre_yz0 = new __uint128_t[param.n_pre0];
-    memset(pre_yz0, 0, param.n_pre0 * sizeof(__uint128_t));
+    std::vector<__uint128_t> pre_yz0(param.n_pre0);
 
     // pre-processing tools
     LpnFp<10> lpn_pre0(param.n_pre0, param.k_pre0, pool, pool->size());
@@ -170,25 +160,22 @@ public:
     Base_svole<IO> *svole0;
     int triple_n0 = 1 + mpfss_pre0.tree_n + param.k_pre0;
     if (party == ALICE) {
-      __uint128_t *key = new __uint128_t[triple_n0];
+      std::vector<__uint128_t> key(triple_n0);
       svole0 = new Base_svole<IO>(party, ios[0], Delta);
-      svole0->triple_gen_send(key, triple_n0);
+      svole0->triple_gen_send(key.data(), triple_n0);
 
-      extend_send(pre_yz0, &mpfss_pre0, &pre_ot_ini0, &lpn_pre0, key);
-      delete[] key;
+      extend_send(pre_yz0.data(), &mpfss_pre0, &pre_ot_ini0, &lpn_pre0, key.data());
     } else {
-      __uint128_t *mac = new __uint128_t[triple_n0];
+      std::vector<__uint128_t> mac(triple_n0);
       svole0 = new Base_svole<IO>(party, ios[0]);
-      svole0->triple_gen_recv(mac, triple_n0);
+      svole0->triple_gen_recv(mac.data(), triple_n0);
 
-      extend_recv(pre_yz0, &mpfss_pre0, &pre_ot_ini0, &lpn_pre0, mac);
-      delete[] mac;
+      extend_recv(pre_yz0.data(), &mpfss_pre0, &pre_ot_ini0, &lpn_pre0, mac.data());
     }
     delete svole0;
 
     // space for pre-processing triples
-    pre_yz = new __uint128_t[param.n_pre];
-    memset(pre_yz, 0, param.n_pre * sizeof(__uint128_t));
+    pre_yz.assign(param.n_pre, 0);
 
     // pre-processing tools
     LpnFp<10> lpn_pre(param.n_pre, param.k_pre, pool, pool->size());
@@ -203,33 +190,29 @@ public:
 
     // generate 2*tree_n+k_pre triples and extend
     if (party == ALICE) {
-      extend_send(pre_yz, &mpfss_pre, &pre_ot_ini, &lpn_pre, pre_yz0);
+      extend_send(pre_yz.data(), &mpfss_pre, &pre_ot_ini, &lpn_pre, pre_yz0.data());
     } else {
-      extend_recv(pre_yz, &mpfss_pre, &pre_ot_ini, &lpn_pre, pre_yz0);
+      extend_recv(pre_yz.data(), &mpfss_pre, &pre_ot_ini, &lpn_pre, pre_yz0.data());
     }
     pre_ot_inplace = true;
-
-    delete[] pre_yz0;
 
     fut.get();
   }
 
   void extend(__uint128_t *data_yz, int num) {
-    if (vole_triples == nullptr) {
-      vole_triples = new __uint128_t[param.n];
-      // memset(vole_triples, 0, n*sizeof(__uint128_t));
-    }
+    if (vole_triples.empty())
+      vole_triples.resize(param.n);
     if (extend_initialized == false)
       error("Run setup before extending");
     if (num <= silent_ot_left()) {
-      memcpy(data_yz, vole_triples + ot_used, num * sizeof(__uint128_t));
+      memcpy(data_yz, vole_triples.data() + ot_used, num * sizeof(__uint128_t));
       this->ot_used += num;
       return;
     }
     __uint128_t *pt = data_yz;
     int gened = silent_ot_left();
     if (gened > 0) {
-      memcpy(pt, vole_triples + ot_used, gened * sizeof(__uint128_t));
+      memcpy(pt, vole_triples.data() + ot_used, gened * sizeof(__uint128_t));
       pt += gened;
     }
     int round_inplace = (num - gened - M) / ot_limit;
@@ -243,14 +226,14 @@ public:
       pt += ot_limit;
     }
     if (round_memcpy) {
-      extend(vole_triples);
-      memcpy(pt, vole_triples, ot_limit * sizeof(__uint128_t));
+      extend(vole_triples.data());
+      memcpy(pt, vole_triples.data(), ot_limit * sizeof(__uint128_t));
       ot_used = ot_limit;
       pt += ot_limit;
     }
     if (last_round_ot > 0) {
-      extend(vole_triples);
-      memcpy(pt, vole_triples, last_round_ot * sizeof(__uint128_t));
+      extend(vole_triples.data());
+      memcpy(pt, vole_triples.data(), last_round_ot * sizeof(__uint128_t));
       ot_used = last_round_ot;
     }
   }
@@ -285,9 +268,9 @@ public:
       io->send_data(y, size * sizeof(__uint128_t));
     } else {
       __uint128_t delta;
-      __uint128_t *k = new __uint128_t[size];
+      std::vector<__uint128_t> k(size);
       io->recv_data(&delta, sizeof(__uint128_t));
-      io->recv_data(k, size * sizeof(__uint128_t));
+      io->recv_data(k.data(), size * sizeof(__uint128_t));
       for (int i = 0; i < size; ++i) {
         __uint128_t tmp = mod(delta * (y[i] >> 64), pr);
         tmp = mod(tmp + k[i], pr);

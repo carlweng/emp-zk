@@ -1,14 +1,11 @@
 #ifndef EMP_ZK_BOOL_H__
 #define EMP_ZK_BOOL_H__
-#include "emp-zk/emp-zk-bool/cheat_record.h"
-#include "emp-zk/emp-zk-bool/ostriple.h"
 #include "emp-zk/emp-zk-bool/polynomial.h"
 #include "emp-zk/emp-zk-bool/zk_bool_backend.h"
 
 namespace emp {
 
 inline void setup_zk_bool(BoolIO **ios, int threads, int party) {
-  CheatRecord::reset();
   if (party == ALICE)
     backend = new ZKBoolBackendPrv(ios, threads);
   else
@@ -21,10 +18,9 @@ inline block get_bool_delta() { return get_bool_backend_ver()->delta; }
 
 inline void sync_zk_bool() { get_bool_backend()->sync(); }
 
-inline bool finalize_zk_bool() {
+inline void finalize_zk_bool() {
   delete backend;
   backend = nullptr;
-  return CheatRecord::cheated();
 }
 
 inline void zkp_poly_deg2(Bit *x, Bit *y, bool *coeff, int len) {

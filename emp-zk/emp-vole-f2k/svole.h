@@ -43,10 +43,10 @@ public:
   bool is_malicious;
   bool extend_initialized;
   bool pre_ot_inplace;
-  block *pre_yz = nullptr;
-  block *pre_x = nullptr;
-  block *vole_yz = nullptr;
-  block *vole_x = nullptr;
+  std::vector<block> pre_yz;
+  std::vector<block> pre_x;
+  std::vector<block> vole_yz;
+  std::vector<block> vole_x;
 
   FerretCOT *ferret = nullptr;
   BaseSVoleF2k<IO> *base_svole = nullptr;
@@ -72,18 +72,10 @@ public:
   }
 
   ~SVoleF2k() {
-    if (pre_yz != nullptr)
-      delete[] pre_yz;
-    if (pre_x != nullptr)
-      delete[] pre_x;
     if (lpn != nullptr)
       delete lpn;
     if (pool != nullptr)
       delete pool;
-    if (vole_yz != nullptr)
-      delete[] vole_yz;
-    if (vole_x != nullptr)
-      delete[] vole_x;
     if (base_svole != nullptr)
       delete base_svole;
     if (base_cot != nullptr)
@@ -143,11 +135,11 @@ public:
     base_cot->cot_gen(ot_pre, ot_pre->n);
     if (party == ALICE) {
       memset(x, 0, param.n * sizeof(block));
-      extend_send(x, yz, pre_x, pre_yz, param.t, mpfss, ot_pre, lpn);
-      memcpy(pre_x, x + ot_limit, M * sizeof(block));
+      extend_send(x, yz, pre_x.data(), pre_yz.data(), param.t, mpfss, ot_pre, lpn);
+      memcpy(pre_x.data(), x + ot_limit, M * sizeof(block));
     } else
-      extend_recv(yz, pre_yz, param.t, mpfss, ot_pre, lpn);
-    memcpy(pre_yz, yz + ot_limit, M * sizeof(block));
+      extend_recv(yz, pre_yz.data(), param.t, mpfss, ot_pre, lpn);
+    memcpy(pre_yz.data(), yz + ot_limit, M * sizeof(block));
   }
 
   void setup() {
@@ -160,16 +152,12 @@ public:
 
     // space for pre-processing triples
     int M_pre = param.k_pre + param.t_pre + 1;
-    pre_yz = new block[param.n_pre];
-    block *pre_x0 = nullptr;
-    block *pre_yz0 = new block[M_pre];
-    memset(pre_yz, 0, param.n_pre * sizeof(block));
-    memset(pre_yz0, 0, M_pre * sizeof(block));
+    pre_yz.assign(param.n_pre, zero_block);
+    std::vector<block> pre_x0;
+    std::vector<block> pre_yz0(M_pre, zero_block);
     if (party == ALICE) {
-      pre_x = new block[param.n_pre];
-      pre_x0 = new block[M_pre];
-      memset(pre_x, 0, param.n_pre * sizeof(block));
-      memset(pre_x0, 0, M_pre * sizeof(block));
+      pre_x.assign(param.n_pre, zero_block);
+      pre_x0.assign(M_pre, zero_block);
     }
 
     // pre-processing tools
@@ -182,24 +170,21 @@ public:
 
     // generate tree_n*(depth-1) COTs
     base_cot->cot_gen(&ot_pre1, ot_pre1.n);
-    base_svole_pre.extend(pre_x0, pre_yz0, M_pre);
+    base_svole_pre.extend(pre_x0.data(), pre_yz0.data(), M_pre);
 
     // generate 2*tree_n+k_pre triples and extend
     if (party == ALICE) {
-      extend_send(pre_x, pre_yz, pre_x0, pre_yz0, param.t_pre, &mpfss_pre,
-                  &ot_pre1, &lpn_pre);
+      extend_send(pre_x.data(), pre_yz.data(), pre_x0.data(), pre_yz0.data(),
+                  param.t_pre, &mpfss_pre, &ot_pre1, &lpn_pre);
     } else {
-      extend_recv(pre_yz, pre_yz0, param.t_pre, &mpfss_pre, &ot_pre1, &lpn_pre);
+      extend_recv(pre_yz.data(), pre_yz0.data(), param.t_pre, &mpfss_pre,
+                  &ot_pre1, &lpn_pre);
     }
     pre_ot_inplace = true;
 
-    delete[] pre_yz0;
+    vole_yz.resize(param.n);
     if (party == ALICE)
-      delete[] pre_x0;
-
-    vole_yz = new block[param.n];
-    if (party == ALICE)
-      vole_x = new block[param.n];
+      vole_x.resize(param.n);
   }
 
   uint64_t extend_inplace(block *data_x, block *data_yz, int byte_space) {

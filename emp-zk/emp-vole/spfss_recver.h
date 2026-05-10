@@ -10,24 +10,18 @@ using namespace emp;
 
 template <typename IO> class SpfssRecverFp {
 public:
-  block *ggm_tree, *m;
+  block *ggm_tree;
+  std::vector<block> m;
   __uint128_t *ggm_tree_int;
-  bool *b;
+  std::unique_ptr<bool[]> b;
   int choice_pos, depth, leave_n;
   IO *io;
   uint64_t share;
 
-  SpfssRecverFp(IO *io, int depth_in) {
-    this->io = io;
-    this->depth = depth_in;
-    this->leave_n = 1 << (depth_in - 1);
-    m = new block[depth - 1];
-    b = new bool[depth - 1];
-  }
-
-  ~SpfssRecverFp() {
-    delete[] m;
-    delete[] b;
+  SpfssRecverFp(IO *io, int depth_in)
+      : depth(depth_in), leave_n(1 << (depth_in - 1)), io(io) {
+    m.resize(depth - 1);
+    b.reset(new bool[depth - 1]);
   }
 
   int get_index() {
@@ -43,7 +37,7 @@ public:
   // receive the message and reconstruct the tree
   // j: position of the secret, begins from 0
   template <typename OT> void recv(OT *ot, IO *io2, int s) {
-    ot->recv(m, b, depth - 1, io2, s);
+    ot->recv(m.data(), b.get(), depth - 1, io2, s);
     io2->recv_data(&share, sizeof(uint64_t));
   }
 
@@ -53,7 +47,7 @@ public:
   void compute(__uint128_t *ggm_tree_mem, __uint128_t delta2) {
     ggm_tree_int = ggm_tree_mem;
     this->ggm_tree = (block *)ggm_tree_mem;
-    ggm_tree_reconstruction(b, m);
+    ggm_tree_reconstruction(b.get(), m.data());
 
     ggm_tree[choice_pos] = zero_block;
     uint64_t nodes_sum = (uint64_t)0;
@@ -100,29 +94,25 @@ public:
   // beta only use high 64 bits
   // x is the high 64 bits of z
   void consistency_check(IO *io2, __uint128_t z, __uint128_t beta) {
-    __uint128_t *chi = new __uint128_t[leave_n];
+    std::vector<__uint128_t> chi(leave_n);
     Hash hash;
     __uint128_t digest =
         (__uint128_t)hash.hash_for_block(&share, sizeof(uint64_t));
     digest = mod(_mm_extract_epi64((block)digest, 0));
-    uni_hash_coeff_gen(chi, digest, leave_n);
+    uni_hash_coeff_gen(chi.data(), digest, leave_n);
 
     // x_star = x - chi_alpha * beta
     __uint128_t tmp = mod(chi[choice_pos] * (beta >> 64), pr);
     __uint128_t x_star = pr - (z >> 64);
-    // tmp = pr - tmp;
-    //__uint128_t x_star = mod((z>>64) + tmp, pr);
     x_star = mod(x_star + tmp, pr);
     io2->send_data(&x_star, sizeof(__uint128_t));
     io2->flush();
 
     // W = \sum{chi_i*w_i} - Z
     __uint128_t W =
-        vector_inn_prdt_sum_red(chi, (__uint128_t *)ggm_tree, leave_n);
+        vector_inn_prdt_sum_red(chi.data(), (__uint128_t *)ggm_tree, leave_n);
     tmp = pr - ((__uint128_t)z & 0xFFFFFFFFFFFFFFFFLL);
     W = mod(W + tmp, pr);
-
-    // std::cout << "W: " << (block)W << std::endl;
 
     // TODO F_eq
     __uint128_t V;
@@ -136,28 +126,24 @@ public:
     uint64_t tmp2 = (uint64_t)(beta >> 64);
     ggm_tree_int[choice_pos] =
         ((__uint128_t)tmp2 << 64) ^ ggm_tree_int[choice_pos];
-
-    delete[] chi;
   }
 
   void consistency_check_msg_gen(__uint128_t &chi_alpha, __uint128_t &W,
                                  IO *io2, __uint128_t beta, block seed) {
-    __uint128_t *chi = new __uint128_t[leave_n];
+    std::vector<__uint128_t> chi(leave_n);
     Hash hash;
     __uint128_t digest =
         mod(_mm_extract_epi64(hash.hash_for_block(&seed, sizeof(block)), 0));
-    uni_hash_coeff_gen(chi, digest, leave_n);
+    uni_hash_coeff_gen(chi.data(), digest, leave_n);
 
     chi_alpha = chi[choice_pos];
 
     // W = \sum{chi_i*w_i}
-    W = vector_inn_prdt_sum_red(chi, (__uint128_t *)ggm_tree, leave_n);
+    W = vector_inn_prdt_sum_red(chi.data(), (__uint128_t *)ggm_tree, leave_n);
 
     uint64_t tmp2 = _mm_extract_epi64((block)beta, 1);
     ggm_tree_int[choice_pos] =
         ((__uint128_t)tmp2 << 64) ^ ggm_tree_int[choice_pos];
-
-    delete[] chi;
   }
 };
 #endif

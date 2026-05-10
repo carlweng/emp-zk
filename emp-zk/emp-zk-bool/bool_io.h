@@ -12,21 +12,20 @@ class BoolIO : public IOChannel {
 public:
   IOChannel *io;
   Hash hash; // modelled as RO
-  bool *buf;
+  // Raw bool[] (not std::vector<bool>) so send_bool_raw / recv_bool_raw
+  // get a real `bool*`; vector<bool> is bit-packed and would not work.
+  std::unique_ptr<bool[]> buf;
   int ptr;
   bool sender;
   vector<unsigned char> tmp_arr;
   BoolIO(IOChannel *io, int sender) : io(io), sender(sender) {
-    buf = new bool[NETWORK_BUFFER_SIZE2];
+    buf.reset(new bool[NETWORK_BUFFER_SIZE2]);
     if (sender)
       ptr = 0;
     else
       ptr = NETWORK_BUFFER_SIZE2;
   }
-  ~BoolIO() {
-    this->flush();
-    delete[] buf;
-  }
+  ~BoolIO() { this->flush(); }
   void flush() override {
     if (sender) {
       if (ptr != 0) {
@@ -50,14 +49,14 @@ public:
     buf[ptr] = data;
     ptr++;
     if (ptr == NETWORK_BUFFER_SIZE2) {
-      send_bool_raw(buf, NETWORK_BUFFER_SIZE2);
+      send_bool_raw(buf.get(), NETWORK_BUFFER_SIZE2);
       ptr = 0;
     }
   }
 
   bool recv_bit() {
     if (ptr == NETWORK_BUFFER_SIZE2) {
-      recv_bool_raw(buf, NETWORK_BUFFER_SIZE2);
+      recv_bool_raw(buf.get(), NETWORK_BUFFER_SIZE2);
       ptr = 0;
     }
     bool res = buf[ptr];

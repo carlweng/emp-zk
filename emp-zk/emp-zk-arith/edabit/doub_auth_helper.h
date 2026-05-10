@@ -27,25 +27,23 @@ public:
   /* --------------------- reveal and return value ----------------------*/
 
   void open_check_send(uint64_t *val, __uint128_t *dat_fp, int len) {
-    uint64_t *mac = new uint64_t[len];
+    std::vector<uint64_t> mac(len);
     for (int i = 0; i < len; ++i) {
       val[i] = _mm_extract_epi64((block)dat_fp[i], 1);
       mac[i] = _mm_extract_epi64((block)dat_fp[i], 0);
     }
-    hash.put(mac, len * sizeof(uint64_t));
+    hash.put(mac.data(), len * sizeof(uint64_t));
     io->send_data(val, len * sizeof(uint64_t));
-    delete[] mac;
   }
 
   void open_check_recv(uint64_t *val, __uint128_t *dat_fp, int len) {
     io->recv_data(val, len * sizeof(uint64_t));
-    uint64_t *mac = new uint64_t[len];
+    std::vector<uint64_t> mac(len);
     for (int i = 0; i < len; ++i) {
       mac[i] = mult_mod(val[i], (uint64_t)delta_fp);
       mac[i] = add_mod((uint64_t)dat_fp[i], mac[i]);
     }
-    hash.put(mac, len * sizeof(uint64_t));
-    delete[] mac;
+    hash.put(mac.data(), len * sizeof(uint64_t));
   }
 
   // The Integer-side reveal short-circuits through the prover's
@@ -66,30 +64,29 @@ public:
   /* --------------------- open and check ----------------------*/
 
   void open_check_send(Integer *dat_f2, __uint128_t *dat_fp, int len) {
-    uint64_t *val = new uint64_t[len];
+    std::vector<uint64_t> val(len);
     for (int i = 0; i < len; ++i) {
       val[i] = _mm_extract_epi64((block)dat_fp[i], 1);
       uint64_t mac = _mm_extract_epi64((block)dat_fp[i], 0);
       hash.put(&mac, sizeof(uint64_t));
     }
-    io->send_data(val, len * sizeof(uint64_t));
+    io->send_data(val.data(), len * sizeof(uint64_t));
     io->flush();
     int bit_len = dat_f2[0].size();
     for (int i = 0; i < len; ++i)
       hash.put_block((block *)dat_f2[i].bits.data(), bit_len);
-    delete[] val;
   }
 
   void open_check_recv(Integer *dat_f2, __uint128_t *dat_fp, int len) {
-    uint64_t *val = new uint64_t[len];
-    io->recv_data(val, len * sizeof(uint64_t));
+    std::vector<uint64_t> val(len);
+    io->recv_data(val.data(), len * sizeof(uint64_t));
     for (int i = 0; i < len; ++i) {
       uint64_t tmp = mult_mod(val[i], (uint64_t)delta_fp);
       tmp = add_mod((uint64_t)dat_fp[i], tmp);
       hash.put(&tmp, sizeof(uint64_t));
     }
     int bit_len = dat_f2[0].size();
-    block *auth_f2 = new block[bit_len];
+    std::vector<block> auth_f2(bit_len);
     for (int i = 0; i < len; ++i) {
       std::bitset<64> bs(val[i]);
       for (int j = 0; j < bit_len; ++j) {
@@ -98,10 +95,8 @@ public:
         else
           auth_f2[j] = dat_f2[i].bits[j].bit;
       }
-      hash.put_block(auth_f2, bit_len);
+      hash.put_block(auth_f2.data(), bit_len);
     }
-    delete[] auth_f2;
-    delete[] val;
   }
 
   /* --------------------- finalize check ----------------------*/

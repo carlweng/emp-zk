@@ -1,0 +1,5 @@
+#include "emp-zk/emp-zk-bool/ram-zk/ostriple.h"
+#include "emp-zk/emp-zk-bool/ram-zk/poly_prdt.h"
+#include "emp-zk/emp-zk-bool/ram-zk/ro-zk-mem.h"
+#include "emp-zk/emp-zk-bool/ram-zk/zk-mem-ext.h"
+#include "emp-zk/emp-zk-bool/ram-zk/zk-mem.h"

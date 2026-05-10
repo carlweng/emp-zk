@@ -124,9 +124,7 @@ void test_merkle_tree(BoolIO *ios[threads], int party, int depth) {
 
   Bit res = Bit(false, PUBLIC);
   bool ret = res.reveal<bool>(PUBLIC);
-  bool cheated = finalize_zk_bool();
-  if (cheated)
-    error("cheated\n");
+  finalize_zk_bool();
   std::cout << depth << " " << time_from(start) << " ms " << party << " " << ret
             << "\n";
 

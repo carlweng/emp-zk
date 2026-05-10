@@ -10,73 +10,55 @@ public:
   int party;
   int m;
   IO *io;
-  block *K = nullptr;
   __uint128_t delta;
-  PRG *G0 = nullptr, *G1 = nullptr;
-  bool *delta_bool = nullptr;
+  std::vector<PRG> G0, G1;
+  std::unique_ptr<bool[]> delta_bool;
   __uint128_t mask;
 
-  Cope(int party, IO *io, int m) {
-    this->party = party;
-    this->m = m;
-    this->io = io;
+  Cope(int party, IO *io, int m) : party(party), m(m), io(io) {
     mask = (__uint128_t)0xFFFFFFFFFFFFFFFFLL;
-  }
-
-  ~Cope() {
-    if (G0 != nullptr)
-      delete[] G0;
-    if (G1 != nullptr)
-      delete[] G1;
-    if (delta_bool != nullptr)
-      delete[] delta_bool;
   }
 
   // sender
   void initialize(__uint128_t delta) {
     this->delta = delta;
-    delta_bool = new bool[m];
-    delta64_to_bool(delta_bool, delta);
+    delta_bool.reset(new bool[m]);
+    delta64_to_bool(delta_bool.get(), delta);
 
-    K = new block[m];
+    std::vector<block> K(m);
     OTCO otco(io);
-    otco.recv(K, delta_bool, m);
+    otco.recv(K.data(), delta_bool.get(), m);
 
-    G0 = new PRG[m];
+    G0.resize(m);
     for (int i = 0; i < m; ++i)
-      G0[i].reseed(K + i);
-
-    delete[] K;
+      G0[i].reseed(K.data() + i);
   }
 
   // recver
   void initialize() {
-    K = new block[2 * m];
+    std::vector<block> K(2 * m);
     PRG prg;
-    prg.random_block(K, 2 * m);
+    prg.random_block(K.data(), 2 * m);
     OTCO otco(io);
-    otco.send(K, K + m, m);
+    otco.send(K.data(), K.data() + m, m);
 
-    G0 = new PRG[m];
-    G1 = new PRG[m];
+    G0.resize(m);
+    G1.resize(m);
     for (int i = 0; i < m; ++i) {
-      G0[i].reseed(K + i);
-      G1[i].reseed(K + m + i);
+      G0[i].reseed(K.data() + i);
+      G1[i].reseed(K.data() + m + i);
     }
-
-    delete[] K;
   }
 
   // sender
   __uint128_t extend() {
-    __uint128_t *w = new __uint128_t[m];
-    __uint128_t *v = new __uint128_t[m];
+    std::vector<__uint128_t> w(m), v(m);
     for (int i = 0; i < m; ++i) {
       G0[i].random_block((block *)(&w[i]), 1);
       extract_fp(w[i]);
     }
 
-    io->recv_data(v, m * sizeof(__uint128_t));
+    io->recv_data(v.data(), m * sizeof(__uint128_t));
     __uint128_t ch[2];
     ch[0] = (__uint128_t)0;
     for (int i = 0; i < m; ++i) {
@@ -84,13 +66,12 @@ public:
       v[i] = mod(w[i] + ch[delta_bool[i]], pr);
     }
 
-    return prm2pr(v);
+    return prm2pr(v.data());
   }
 
   // sender batch
   void extend(__uint128_t *ret, int size) {
-    uint64_t *w = new uint64_t[m * size];
-    uint64_t *v = new uint64_t[m * size];
+    std::vector<uint64_t> w(m * size), v(m * size);
     for (int i = 0; i < m; ++i) {
       G0[i].random_data(&w[i * size], size * sizeof(uint64_t));
       for (int j = 0; j < size; ++j) {
@@ -108,17 +89,12 @@ public:
       }
     }
 
-    prm2pr(ret, v, size);
-
-    delete[] w;
-    delete[] v;
+    prm2pr(ret, v.data(), size);
   }
 
   // recver
   __uint128_t extend(__uint128_t u) {
-    __uint128_t *w0 = new __uint128_t[m];
-    __uint128_t *w1 = new __uint128_t[m];
-    __uint128_t *tau = new __uint128_t[m];
+    std::vector<__uint128_t> w0(m), w1(m), tau(m);
     for (int i = 0; i < m; ++i) {
       G0[i].random_block((block *)(&w0[i]), 1);
       G1[i].random_block((block *)(&w1[i]), 1);
@@ -129,16 +105,15 @@ public:
       tau[i] = mod(w0[i] + w1[i], pr);
     }
 
-    io->send_data(tau, m * sizeof(__uint128_t));
+    io->send_data(tau.data(), m * sizeof(__uint128_t));
     io->flush();
 
-    return prm2pr(w0);
+    return prm2pr(w0.data());
   }
 
   // recver batch
   void extend(__uint128_t *ret, uint64_t *u, int size) {
-    uint64_t *w0 = new uint64_t[m * size];
-    uint64_t *w1 = new uint64_t[m * size];
+    std::vector<uint64_t> w0(m * size), w1(m * size);
     for (int i = 0; i < m; ++i) {
       G0[i].random_data(&w0[i * size], size * sizeof(uint64_t));
       G1[i].random_data(&w1[i * size], size * sizeof(uint64_t));
@@ -150,14 +125,10 @@ public:
         w1[i * size + j] = PR - w1[i * size + j];
         uint64_t tau = add_mod(w0[i * size + j], w1[i * size + j]);
         io->send_data(&tau, sizeof(uint64_t));
-        //			io->flush();
       }
     }
 
-    prm2pr(ret, w0, size);
-
-    delete[] w0;
-    delete[] w1;
+    prm2pr(ret, w0.data(), size);
   }
 
   void delta64_to_bool(bool *bdata, __uint128_t u128) {
@@ -209,9 +180,9 @@ public:
       io->send_data(b, sz * sizeof(__uint128_t));
     } else {
       uint64_t delta;
-      __uint128_t *c = new __uint128_t[sz];
+      std::vector<__uint128_t> c(sz);
       io->recv_data(&delta, sizeof(uint64_t));
-      io->recv_data(c, sz * sizeof(__uint128_t));
+      io->recv_data(c.data(), sz * sizeof(__uint128_t));
       for (int i = 0; i < sz; ++i) {
         __uint128_t tmp = mod((__uint128_t)a[i] * delta, pr);
         tmp = mod(tmp + c[i], pr);

@@ -2,7 +2,7 @@
 #define OS_TRIPLE_F2K_H__
 
 #include "emp-zk/emp-vole-f2k/svole.h"
-#include "emp-zk/extensions/ram-zk/poly_prdt.h"
+#include "emp-zk/emp-zk-bool/ram-zk/poly_prdt.h"
 
 template <typename IO> class F2kOSTriple {
 public:
@@ -10,12 +10,12 @@ public:
   block delta;
 
   int authf2k_cnt = 0, check_cnt = 0;
-  block *auth_buffer_val = nullptr;
-  block *auth_buffer_mac = nullptr;
-  block *andgate_buffer_left_val = nullptr;
-  block *andgate_buffer_left_mac = nullptr;
-  block *andgate_buffer_rght_val = nullptr;
-  block *andgate_buffer_rght_mac = nullptr;
+  std::vector<block> auth_buffer_val;
+  std::vector<block> auth_buffer_mac;
+  std::vector<block> andgate_buffer_left_val;
+  std::vector<block> andgate_buffer_left_mac;
+  std::vector<block> andgate_buffer_rght_val;
+  std::vector<block> andgate_buffer_rght_mac;
 
   GaloisFieldPacking pack;
 
@@ -26,6 +26,10 @@ public:
   SVoleF2k<IO> *svole = nullptr;
   F2kPolyPrdt<IO> *polyprdt = nullptr;
   ThreadPool *pool = nullptr;
+  // One chunk of scratch for ferret->rcot_*_next; allocated lazily in
+  // andgate_correctness_check_manage. The bool backend opens the
+  // long-lived ferret session, so rcot_*_next is callable here.
+  std::vector<block> ope_buf;
 
   int64_t BUFFER_MEM_SZ = -1, BUFFER_SZ = -1;
 
@@ -42,12 +46,12 @@ public:
     BUFFER_MEM_SZ = svole->param.n;
     BUFFER_SZ = svole->param.buf_sz();
 
-    auth_buffer_val = new block[BUFFER_MEM_SZ];
-    auth_buffer_mac = new block[BUFFER_MEM_SZ];
-    andgate_buffer_left_val = new block[BUFFER_SZ];
-    andgate_buffer_left_mac = new block[BUFFER_SZ];
-    andgate_buffer_rght_val = new block[BUFFER_SZ];
-    andgate_buffer_rght_mac = new block[BUFFER_SZ];
+    auth_buffer_val.resize(BUFFER_MEM_SZ);
+    auth_buffer_mac.resize(BUFFER_MEM_SZ);
+    andgate_buffer_left_val.resize(BUFFER_SZ);
+    andgate_buffer_left_mac.resize(BUFFER_SZ);
+    andgate_buffer_rght_val.resize(BUFFER_SZ);
+    andgate_buffer_rght_mac.resize(BUFFER_SZ);
 
     polyprdt = new F2kPolyPrdt<IO>(party, ios[0], ferret);
 
@@ -60,12 +64,6 @@ public:
     if (andgate_buf_not_empty()) {
       andgate_correctness_check_manage();
     }
-    delete[] auth_buffer_val;
-    delete[] auth_buffer_mac;
-    delete[] andgate_buffer_left_val;
-    delete[] andgate_buffer_left_mac;
-    delete[] andgate_buffer_rght_val;
-    delete[] andgate_buffer_rght_mac;
   }
 
   uint64_t communication() {
@@ -215,8 +213,8 @@ public:
     vector<future<void>> fut;
 
     int share_seed_n = threads;
-    block *share_seed = new block[share_seed_n];
-    PRG(&seed).random_block(share_seed, share_seed_n);
+    std::vector<block> share_seed(share_seed_n);
+    PRG(&seed).random_block(share_seed.data(), share_seed_n);
 
     uint32_t task_base, leftover;
     if (check_cnt < threads) {
@@ -227,22 +225,27 @@ public:
       leftover = task_base + (check_cnt % task_base);
     }
     uint32_t start = 0;
-    block *sum = new block[2 * threads];
+    std::vector<block> sum(2 * threads);
+    block *sum_p   = sum.data();
+    block *seeds_p = share_seed.data();
     for (int i = 0; i < threads - 1; ++i) {
       fut.push_back(
-          pool->enqueue([this, sum, i, start, task_base, share_seed]() {
-            andgate_correctness_check(sum, i, start, task_base, share_seed[i]);
+          pool->enqueue([this, sum_p, i, start, task_base, seeds_p]() {
+            andgate_correctness_check(sum_p, i, start, task_base, seeds_p[i]);
           }));
       start += task_base;
     }
-    andgate_correctness_check(sum, threads - 1, start, leftover,
-                              share_seed[threads - 1]);
+    andgate_correctness_check(sum_p, threads - 1, start, leftover,
+                              seeds_p[threads - 1]);
 
     for (auto &f : fut)
       f.get();
 
-    block ope_data[128];
-    ferret->rcot_send(ope_data, 128);
+    if (ope_buf.empty()) ope_buf.resize(ferret->chunk_ots());
+    // ferret_party = 3-party; ferret is the OT-sender exactly when this side is BOB.
+    if (party == BOB) ferret->rcot_send_next(ope_buf.data());
+    else              ferret->rcot_recv_next(ope_buf.data());
+    block *ope_data = ope_buf.data();
     if (party == ALICE) {
       uint64_t ch_bits[2];
       for (int i = 0; i < 2; ++i) {
@@ -275,23 +278,20 @@ public:
       gfmul(A_star[1], this->delta, &W);
       W = W ^ A_star[0];
       if (cmpBlock(&W, &B_star, 1) != 1)
-        std::cout << "check manage: fail" << std::endl;
-      // CheatRecord::put("emp_zk_bool AND batch check");
+        error("emp_zk_bool AND batch check");
     }
     io->flush();
-    delete[] share_seed;
-    delete[] sum;
   }
 
   void andgate_correctness_check(block *ret, int thr_i, uint32_t start,
                                  uint32_t task_n, block chi_seed) {
     if (task_n == 0)
       return;
-    block *lval = andgate_buffer_left_val;
-    block *lmac = andgate_buffer_left_mac;
-    block *rval = andgate_buffer_rght_val;
-    block *rmac = andgate_buffer_rght_mac;
-    block *omac = auth_buffer_mac + authf2k_cnt - check_cnt;
+    block *lval = andgate_buffer_left_val.data();
+    block *lmac = andgate_buffer_left_mac.data();
+    block *rval = andgate_buffer_rght_val.data();
+    block *rmac = andgate_buffer_rght_mac.data();
+    block *omac = auth_buffer_mac.data() + authf2k_cnt - check_cnt;
 
     if (party == ALICE) {
       for (uint32_t i = start; i < start + task_n; ++i) {
@@ -314,21 +314,19 @@ public:
       }
     }
 
-    block *chi = new block[task_n];
-    uni_hash_coeff_gen(chi, chi_seed, task_n);
+    std::vector<block> chi(task_n);
+    uni_hash_coeff_gen(chi.data(), chi_seed, task_n);
     if (party == ALICE) {
-      vector_inn_prdt_sum_red(ret + 2 * thr_i, chi, lval + start, task_n);
-      vector_inn_prdt_sum_red(ret + 2 * thr_i + 1, chi, rval + start, task_n);
+      vector_inn_prdt_sum_red(ret + 2 * thr_i, chi.data(), lval + start, task_n);
+      vector_inn_prdt_sum_red(ret + 2 * thr_i + 1, chi.data(), rval + start, task_n);
     } else
-      vector_inn_prdt_sum_red(ret + thr_i, chi, lval + start, task_n);
-
-    delete[] chi;
+      vector_inn_prdt_sum_red(ret + thr_i, chi.data(), lval + start, task_n);
   }
 
   /* ---------------------helper functions----------------------*/
 
   void pre_f2k_buffer_refill() {
-    svole->extend_inplace(auth_buffer_val, auth_buffer_mac, BUFFER_MEM_SZ);
+    svole->extend_inplace(auth_buffer_val.data(), auth_buffer_mac.data(), BUFFER_MEM_SZ);
     authf2k_cnt = 0;
   }
 

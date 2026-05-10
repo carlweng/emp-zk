@@ -7,8 +7,11 @@ namespace emp {
 template <typename IO> class OTPre {
 public:
   IO *io;
-  block *pre_data = nullptr;
-  bool *bits = nullptr;
+  std::vector<block> pre_data;
+  // bool[] (not std::vector<bool>) because we need real bool* pointer
+  // arithmetic and memcpy semantics — vector<bool> is bit-packed and
+  // fails on both. unique_ptr gives the same RAII shape as vector.
+  std::unique_ptr<bool[]> bits;
   int n;
   vector<block *> pointers;
   vector<const bool *> choices;
@@ -18,41 +21,32 @@ public:
   CCRH ccrh;
   int length, count;
   block Delta;
-  OTPre(IO *io, int length, int times) {
-    this->io = io;
-    this->length = length;
-    n = length * times;
-    pre_data = new block[2 * n];
-    bits = new bool[n];
-    count = 0;
+  OTPre(IO *io, int length, int times)
+      : io(io), n(length * times), length(length), count(0) {
+    pre_data.resize(2 * n);
+    bits.reset(new bool[n]);
   }
-  ~OTPre() {
-    if (pre_data != nullptr)
-      delete[] pre_data;
 
-    if (bits != nullptr)
-      delete[] bits;
-  }
   void send_pre(block *data, block in_Delta) {
     Delta = in_Delta;
-    ccrh.Hn(pre_data, data, n, pre_data + n);
-    xorBlocks_arr(pre_data + n, data, Delta, n);
-    ccrh.Hn(pre_data + n, pre_data + n, n);
+    ccrh.Hn(pre_data.data(), data, n, pre_data.data() + n);
+    xorBlocks_arr(pre_data.data() + n, data, Delta, n);
+    ccrh.Hn(pre_data.data() + n, pre_data.data() + n, n);
   }
 
   void recv_pre(block *data, bool *b) {
-    memcpy(bits, b, n);
-    ccrh.Hn(pre_data, data, n);
+    memcpy(bits.get(), b, n);
+    ccrh.Hn(pre_data.data(), data, n);
   }
 
   void recv_pre(block *data) {
     for (int i = 0; i < n; ++i)
       bits[i] = getLSB(data[i]);
-    ccrh.Hn(pre_data, data, n);
+    ccrh.Hn(pre_data.data(), data, n);
   }
 
   void choices_sender() {
-    io->recv_data(bits + count, length);
+    io->recv_data(bits.get() + count, length);
     count += length;
   }
 
@@ -60,7 +54,7 @@ public:
     for (int i = 0; i < length; ++i) {
       bits[count + i] = (b[i] != bits[count + i]);
     }
-    io->send_data(bits + count, length);
+    io->send_data(bits.get() + count, length);
     count += length;
   }
 
@@ -80,7 +74,6 @@ public:
       ++k;
       io2->send_block(pad, 2);
     }
-    //	count +=length;
   }
 
   void recv(block *data, const bool *b, int length, IO *io2, int s) {
@@ -92,7 +85,6 @@ public:
       data[i] = pre_data[k] ^ pad[ind];
       ++k;
     }
-    //	count += length;
   }
 };
 } // namespace emp

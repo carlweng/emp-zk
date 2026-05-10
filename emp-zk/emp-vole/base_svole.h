@@ -42,19 +42,18 @@ public:
   // recver
   void triple_gen_recv(__uint128_t *share, int size) {
     PRG prg;
-    uint64_t *x = new uint64_t[size + 1];
-    prg.random_data(x, (size + 1) * sizeof(uint64_t));
+    std::vector<uint64_t> x(size + 1);
+    prg.random_data(x.data(), (size + 1) * sizeof(uint64_t));
     for (int i = 0; i < size + 1; ++i) {
       x[i] = mod(x[i]);
     }
-    cope->extend(share, x, size);
+    cope->extend(share, x.data(), size);
     __uint128_t c;
     cope->extend(&c, &x[size], 1);
-    recver_check(share, x, c, x[size], size);
+    recver_check(share, x.data(), c, x[size], size);
 
     for (int i = 0; i < size; ++i)
       share[i] = (__uint128_t)makeBlock(x[i], share[i]);
-    delete[] x;
   }
 
   // sender check
@@ -64,9 +63,9 @@ public:
     prg.random_data(&seed, sizeof(uint64_t));
     seed = mod(seed);
     io->send_data(&seed, sizeof(uint64_t));
-    uint64_t *chi = new uint64_t[size];
-    uni_hash_coeff_gen(chi, seed, size);
-    uint64_t y = vector_inn_prdt_sum_red(share, chi, size);
+    std::vector<uint64_t> chi(size);
+    uni_hash_coeff_gen(chi.data(), seed, size);
+    uint64_t y = vector_inn_prdt_sum_red(share, chi.data(), size);
     y = add_mod(y, b);
     uint64_t xz[2];
     io->recv_data(xz, 2 * sizeof(uint64_t));
@@ -76,7 +75,6 @@ public:
       std::cout << "base sVOLE check fails" << std::endl;
       abort();
     }
-    delete[] chi;
   }
 
   // receiver check
@@ -84,15 +82,14 @@ public:
                     int size) {
     uint64_t seed;
     io->recv_data(&seed, sizeof(uint64_t));
-    uint64_t *chi = new uint64_t[size];
-    uni_hash_coeff_gen(chi, seed, size);
+    std::vector<uint64_t> chi(size);
+    uni_hash_coeff_gen(chi.data(), seed, size);
     uint64_t xz[2];
-    xz[0] = vector_inn_prdt_sum_red(share, chi, size);
-    xz[1] = vector_inn_prdt_sum_red(x, chi, size);
+    xz[0] = vector_inn_prdt_sum_red(share, chi.data(), size);
+    xz[1] = vector_inn_prdt_sum_red(x, chi.data(), size);
     xz[0] = add_mod(xz[0], c);
     xz[1] = add_mod(xz[1], a);
     io->send_data(xz, 2 * sizeof(uint64_t));
-    delete[] chi;
   }
 };
 

@@ -18,41 +18,44 @@ public:
   int party;
   IOChannel *io;
   block delta;
-  block *buffer = nullptr;  // ALICE: A0 (Δ⁰ coeff); BOB: full B = poly(Δ)
-  block *buffer1 = nullptr; // ALICE: A1 (Δ¹ coeff); BOB: unused
+  std::vector<block> buffer;  // ALICE: A0 (Δ⁰ coeff); BOB: full B = poly(Δ)
+  std::vector<block> buffer1; // ALICE: A1 (Δ¹ coeff); BOB: unused
   int num;
   GaloisFieldPacking pack;
   FerretCOT *ferret = nullptr;
+  // Scratch for one rcot_*_next chunk; allocated lazily on first
+  // batch_check. We pull a full chunk (~8K OTs) per call and use only
+  // the first 128 — batch_check fires once per buffer_sz polys so the
+  // surplus is amortized. The session is opened by the bool backend
+  // that owns this PolyProof; we just call rcot_*_next on it.
+  std::vector<block> ope_buf;
 
   PolyProof(int party, IOChannel *io, FerretCOT *ferret)
       : party(party), io(io), delta(ferret->Delta), ferret(ferret), num(0) {
-    buffer = new block[buffer_sz];
+    buffer.resize(buffer_sz);
     if (party == ALICE)
-      buffer1 = new block[buffer_sz];
+      buffer1.resize(buffer_sz);
   }
 
-  ~PolyProof() {
-    batch_check();
-    delete[] buffer;
-    delete[] buffer1;
-  }
+  ~PolyProof() { batch_check(); }
 
   void batch_check() {
     if (num == 0)
       return;
 
     block seed;
-    block *chi = new block[num > 4 ? num : 4];
-    block ope_data[128];
+    std::vector<block> chi(num > 4 ? num : 4);
+    if (ope_buf.empty()) ope_buf.resize(ferret->chunk_ots());
     block check_sum[2];
     if (party == ALICE) {
       io->recv_data(&seed, sizeof(block));
 
-      uni_hash_coeff_gen(chi, seed, num > 4 ? num : 4);
+      uni_hash_coeff_gen(chi.data(), seed, num > 4 ? num : 4);
 
-      vector_inn_prdt_sum_red(check_sum, chi, buffer, num);
-      vector_inn_prdt_sum_red(check_sum + 1, chi, buffer1, num);
-      ferret->rcot_send(ope_data, 128);
+      vector_inn_prdt_sum_red(check_sum, chi.data(), buffer.data(), num);
+      vector_inn_prdt_sum_red(check_sum + 1, chi.data(), buffer1.data(), num);
+      ferret->rcot_recv_next(ope_buf.data());
+      block *ope_data = ope_buf.data();
       block tmp;
       pack.packing(&tmp, ope_data);
       uint64_t choice_bits[2];
@@ -75,10 +78,11 @@ public:
       io->send_data(&seed, sizeof(block));
       io->flush();
 
-      uni_hash_coeff_gen(chi, seed, num > 4 ? num : 4);
+      uni_hash_coeff_gen(chi.data(), seed, num > 4 ? num : 4);
       block B;
-      vector_inn_prdt_sum_red(&B, chi, buffer, num);
-      ferret->rcot_send(ope_data, 128);
+      vector_inn_prdt_sum_red(&B, chi.data(), buffer.data(), num);
+      ferret->rcot_send_next(ope_buf.data());
+      block *ope_data = ope_buf.data();
       block tmp;
       pack.packing(&tmp, ope_data);
 
@@ -88,10 +92,9 @@ public:
       gfmul(check_sum[1], delta, &tmp);
       check_sum[1] = B ^ tmp;
       if (cmpBlock(check_sum, check_sum + 1, 1) != 1)
-        CheatRecord::put("zk polynomial: boolean polynomial zkp fails");
+        error("zk polynomial: boolean polynomial zkp fails");
     }
     num = 0;
-    delete[] chi;
   }
 
   // Accumulators for one (a, b) pair into the per-call A0 / A1 (ALICE)

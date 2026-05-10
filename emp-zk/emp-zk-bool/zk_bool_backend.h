@@ -65,6 +65,14 @@ public:
   // take_rcot drains rcot_buf and refills via rcot_*_next when empty.
   // Other consumers that share `ferret` (PolyProof / F2kOSTriple /
   // BaseSVoleF2k) call rcot_*_next directly with their own scratch.
+  //
+  // Refill granularity: each refill calls rcot_*_next K times in a
+  // row, filling K * chunk_ots() OTs (1 chunk = 1 cGGM tree). Larger
+  // K cuts the take_rcot dispatch frequency by K but proportionally
+  // grows the buffer: at b13, K=512 → ~67 MiB. NetIO already
+  // auto-batches the per-tree corrections in its 32 KiB send buffer,
+  // so K mostly affects local dispatch, not wire traffic.
+  static constexpr int64_t kRcotRefillK = 1 << 9;
   std::vector<block> rcot_buf;
   int64_t rcot_pos = 0, rcot_avail = 0;
   // ferret was constructed with party = (3 - p), so ferret_is_sender
@@ -75,12 +83,22 @@ public:
   void take_rcot(block *out, int64_t n) {
     while (n > 0) {
       if (rcot_avail == 0) {
-        if ((int64_t)rcot_buf.size() < ferret->chunk_ots())
-          rcot_buf.resize(ferret->chunk_ots());
-        if (ferret_is_sender) ferret->rcot_send_next(rcot_buf.data());
-        else                  ferret->rcot_recv_next(rcot_buf.data());
+        const int64_t chunk = ferret->chunk_ots();
+        const int64_t want = chunk * kRcotRefillK;
+        if ((int64_t)rcot_buf.size() < want) rcot_buf.resize(want);
+        for (int64_t k = 0; k < kRcotRefillK; ++k) {
+          block *slot = rcot_buf.data() + k * chunk;
+          if (ferret_is_sender) ferret->rcot_send_next(slot);
+          else                  ferret->rcot_recv_next(slot);
+        }
+        // Eager flush: push any OT-extension bytes still in NetIO's
+        // send_buf out to the wire so the receiver doesn't stall
+        // waiting for a future refill or run_end. No-op on the recv
+        // side (BoolIO::flush() with ptr==NETWORK_BUFFER_SIZE2 + no
+        // pending sends).
+        io->flush();
         rcot_pos = 0;
-        rcot_avail = ferret->chunk_ots();
+        rcot_avail = want;
       }
       int64_t take = std::min(n, rcot_avail);
       std::memcpy(out, rcot_buf.data() + rcot_pos, take * sizeof(block));

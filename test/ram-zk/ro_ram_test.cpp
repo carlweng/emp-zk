@@ -31,8 +31,8 @@ void bench(BoolIO *ios[threads], int party) {
   auto start = clock_start();
   uint64_t com1 = comm(ios);
   uint64_t com11 = comm2(ios);
-  ROZKRAM<BoolIO> *ram =
-      new ROZKRAM<BoolIO>(party, index_sz, val_sz);
+  ZKRamRO<BoolIO> *ram =
+      new ZKRamRO<BoolIO>(party, index_sz, val_sz);
   ram->init(data);
   std::cout << "init: " << time_from(start) / 1000 << std::endl;
   Integer ind(index_sz, 0, PUBLIC);
@@ -60,8 +60,8 @@ void test(BoolIO *ios[threads], int party) {
   int test_n = (1 << index_sz);
   for (int i = 0; i < test_n; ++i)
     data.push_back(Integer(val_sz, 2 * i, ALICE));
-  ROZKRAM<BoolIO> *ram =
-      new ROZKRAM<BoolIO>(party, index_sz, val_sz);
+  ZKRamRO<BoolIO> *ram =
+      new ZKRamRO<BoolIO>(party, index_sz, val_sz);
   ram->init(data);
   for (int i = 0; i < test_n; ++i) {
     Integer res = ram->read(Integer(index_sz, i, PUBLIC));

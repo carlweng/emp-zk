@@ -1,10 +1,10 @@
-#ifndef ZK_RAM_H__
-#define ZK_RAM_H__
+#ifndef EMP_ZK_RAM_H__
+#define EMP_ZK_RAM_H__
 #include "emp-zk/emp-zk-bool/zk_bool_base.h"
 #include "emp-zk/emp-zk-bool/ram-zk/gf_base.h"
 #include "emp-zk/emp-zk-bool/ram-zk/ostriple.h"
 
-template <typename IO> class ZKRAM {
+template <typename IO> class ZKRam {
 public:
   uint64_t capacity = 1, step = 0;
   vector<uint64_t> mem;
@@ -15,9 +15,9 @@ public:
   IO *io;
   block Delta;
   GaloisFieldPacking gfp;
-  F2kOSTriple<IO> *ostriple = nullptr;
+  RamOSTripleBase<IO> *ostriple = nullptr;
   double online = 0, check1 = 0, check2 = 0;
-  ZKRAM(int _party, int index_sz, int step_sz, int val_sz)
+  ZKRam(int _party, int index_sz, int step_sz, int val_sz)
       : party(_party), index_sz(index_sz), step_sz(step_sz), val_sz(val_sz) {
     capacity = (capacity << index_sz);
     mem.resize(capacity);
@@ -25,11 +25,10 @@ public:
     io = exec->io;
     Delta = exec->delta;
     ostriple =
-        new F2kOSTriple<IO>(party, /*threads=*/1, &exec->io,
-                            exec->ferret, /*pool=*/nullptr);
+        (party == ALICE ? static_cast<RamOSTripleBase<IO>*>(new RamOSTripleProver<IO>(exec->io, exec->ferret)) : static_cast<RamOSTripleBase<IO>*>(new RamOSTripleVerifier<IO>(exec->io, exec->ferret)));
   }
 
-  ~ZKRAM() { delete ostriple; }
+  ~ZKRam() { delete ostriple; }
 
   // can be packed in either order, return extension value and its mac
   void pack(block &mac, const Integer &index, const Integer &val,
@@ -350,4 +349,4 @@ public:
     }
   }
 };
-#endif // ZK_RAM_H__
+#endif // EMP_ZK_RAM_H__

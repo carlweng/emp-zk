@@ -1,9 +1,9 @@
-#ifndef F2K_POLY_PRDT_H__
-#define F2K_POLY_PRDT_H__
+#ifndef EMP_ZK_RAM_POLY_PRDT_H__
+#define EMP_ZK_RAM_POLY_PRDT_H__
 
 #include "emp-zk/emp-vole-f2k/svole.h"
 
-template <typename IO> class F2kPolyPrdt {
+template <typename IO> class RamPolyPrdt {
 public:
   int party;
   IO *io;
@@ -17,7 +17,7 @@ public:
   FerretCOT *ferret = nullptr;
   int num;
 
-  F2kPolyPrdt(int party, IO *io, FerretCOT *ferret)
+  RamPolyPrdt(int party, IO *io, FerretCOT *ferret)
       : party(party), io(io), ferret(ferret) {
     if (party == ALICE) {
       buffer0.resize(buffer_sz);
@@ -35,7 +35,7 @@ public:
     num = 0;
   }
 
-  ~F2kPolyPrdt() { batch_check(); }
+  ~RamPolyPrdt() { batch_check(); }
 
   void batch_check() {
     if (num == 0)

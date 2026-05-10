@@ -1,12 +1,20 @@
-#ifndef OS_TRIPLE_F2K_H__
-#define OS_TRIPLE_F2K_H__
+#ifndef EMP_ZK_RAM_OSTRIPLE_H__
+#define EMP_ZK_RAM_OSTRIPLE_H__
 
 #include "emp-zk/emp-vole-f2k/svole.h"
 #include "emp-zk/emp-zk-bool/ram-zk/poly_prdt.h"
 
-template <typename IO> class F2kOSTriple {
+// =====================================================================
+// Authenticated triple stream backing emp-zk-ram. Mirrors the
+// ZKBoolBase / ZKBoolProver / ZKBoolVerifier split in emp-zk-bool:
+// shared state + pre-f2k buffer + sVOLE / RamPolyPrdt go on the base;
+// each role owns its own arithmetic / batch-check methods (no runtime
+// `if (party == ALICE) … else …` dispatch at the call site).
+// =====================================================================
+
+template <typename IO> class RamOSTripleBase {
 public:
-  int party, threads;
+  int party;
   block delta;
 
   int authf2k_cnt = 0, check_cnt = 0;
@@ -20,12 +28,10 @@ public:
   GaloisFieldPacking pack;
 
   IO *io;
-  IO **ios;
   PRG prg;
   FerretCOT *ferret = nullptr;
   SVoleF2k<IO> *svole = nullptr;
-  F2kPolyPrdt<IO> *polyprdt = nullptr;
-  ThreadPool *pool = nullptr;
+  RamPolyPrdt<IO> *polyprdt = nullptr;
   // One chunk of scratch for ferret->rcot_*_next; allocated lazily in
   // andgate_correctness_check_manage. The bool backend opens the
   // long-lived ferret session, so rcot_*_next is callable here.
@@ -33,15 +39,17 @@ public:
 
   int64_t BUFFER_MEM_SZ = -1, BUFFER_SZ = -1;
 
-  F2kOSTriple(int party, int threads, IO **ios, FerretCOT *ferret,
-              ThreadPool *pool)
-      : party(party), threads(threads), ios(ios), ferret(ferret), pool(pool) {
+  RamOSTripleBase(int party, IO *io, FerretCOT *ferret)
+      : party(party), io(io), ferret(ferret) {
     if (party == BOB)
       this->delta = ferret->Delta;
     else
       this->delta = zero_block;
-    io = ios[0];
-    svole = new SVoleF2k<IO>(party, threads, ios, ferret);
+    // SVoleF2k still takes IO** + threads + (implicit) pool. Pass a
+    // single-element array + threads=1; with threads=1 the SVoleF2k
+    // internal threading skeleton degenerates to a serial loop.
+    IO *ios_one[1] = { io };
+    svole = new SVoleF2k<IO>(party, /*threads=*/1, ios_one, ferret);
     svole->setup(delta);
     BUFFER_MEM_SZ = svole->param.n;
     BUFFER_SZ = svole->param.buf_sz();
@@ -53,42 +61,142 @@ public:
     andgate_buffer_rght_val.resize(BUFFER_SZ);
     andgate_buffer_rght_mac.resize(BUFFER_SZ);
 
-    polyprdt = new F2kPolyPrdt<IO>(party, ios[0], ferret);
+    polyprdt = new RamPolyPrdt<IO>(party, io, ferret);
 
     pre_f2k_buffer_refill();
   }
 
-  ~F2kOSTriple() {
+  // Note: the subclass dtor must flush any pending andgate batch via
+  // andgate_correctness_check_manage() *before* base destruction —
+  // calling that virtual after the subclass vtable is gone aborts
+  // with "Pure virtual function called!".
+  virtual ~RamOSTripleBase() {
     delete polyprdt;
     delete svole;
-    if (andgate_buf_not_empty()) {
-      andgate_correctness_check_manage();
-    }
   }
 
-  uint64_t communication() {
-    uint64_t res = 0;
-    for (int i = 0; i < threads; ++i)
-      res += ios[i]->counter;
-    return res;
+  uint64_t communication() { return io->counter; }
+  void sync() { io->flush(); }
+
+  void pre_f2k_buffer_refill() {
+    svole->extend_inplace(auth_buffer_val.data(),
+                          auth_buffer_mac.data(), BUFFER_MEM_SZ);
+    authf2k_cnt = 0;
   }
 
-  /* ---------------------arithmetic----------------------*/
+  bool andgate_buf_not_empty() { return check_cnt != 0; }
+
+  // ---- Role-specific arithmetic (pure virtual) -------------------------
+
+  virtual void compute_add_const(block &valb, block &macb, const block &vala,
+                                 const block &maca, const block &c) = 0;
+  virtual void compute_mul(block &valc, block &macc, block vala, block maca,
+                           block valb, block macb) = 0;
+
+  // ALICE returns the actual polynomial value a*b[*c[*d[*e]]]; BOB returns
+  // zero_block. Drives the shared compute_mul{3,4,5} bodies below.
+  virtual block compute_mul_v3(block a, block b, block c) = 0;
+  virtual block compute_mul_v4(block a, block b, block c, block d) = 0;
+  virtual block compute_mul_v5(block a, block b, block c, block d, block e) = 0;
+
+  // ---- Shared compute_mul{3,4,5} bodies --------------------------------
+  //
+  // Both roles run the same packing + polyPrdt machinery; the only
+  // difference is the value of v (zero on the verifier). Hoisted into
+  // the base via the compute_mul_v* hooks above.
+
+  void compute_mul3(block &val, block &mac, block &vala, block &maca,
+                    block &valb, block &macb, block &valc, block &macc) {
+    block v = compute_mul_v3(vala, valb, valc);
+    block m = pack_v(v);
+    polyprdt->polyPrdt3(vala, maca, valb, macb, valc, macc, m);
+    val = v;
+    mac = m;
+  }
+
+  void compute_mul4(block &val, block &mac, block &vala, block &maca,
+                    block &valb, block &macb, block &valc, block &macc,
+                    block &vald, block &macd) {
+    block v = compute_mul_v4(vala, valb, valc, vald);
+    block m = pack_v(v);
+    polyprdt->polyPrdt4(vala, maca, valb, macb, valc, macc, vald, macd, m);
+    val = v;
+    mac = m;
+  }
+
+  void compute_mul5(block &val, block &mac, block &vala, block &maca,
+                    block &valb, block &macb, block &valc, block &macc,
+                    block &vald, block &macd, block &vale, block &mace) {
+    block v = compute_mul_v5(vala, valb, valc, vald, vale);
+    block m = pack_v(v);
+    polyprdt->polyPrdt5(vala, maca, valb, macb, valc, macc, vald, macd,
+                        vale, mace, m);
+    val = v;
+    mac = m;
+  }
+
+  // ---- Batch correctness check (role-specific) -------------------------
+
+  virtual void andgate_correctness_check_manage() = 0;
+
+private:
+  // GaloisFieldPacking::base[i] = X^i is no longer exposed on emp-tool
+  // main; pack.packing(res, data) over 128 wires computes the same
+  // Σ data[i]·X^i directly. Wraps the lowInt/highInt prep + packing
+  // path used by all three compute_mul{3,4,5} variants.
+  block pack_v(block v) {
+    uint64_t low  = LOW64(v);
+    uint64_t high = HIGH64(v);
+    Integer lowInt(65, low, ALICE);
+    Integer highInt(65, high, ALICE);
+    block packbuf[128], m;
+    memcpy(packbuf,      lowInt.bits.data(),  64 * sizeof(block));
+    memcpy(packbuf + 64, highInt.bits.data(), 64 * sizeof(block));
+    pack.packing(&m, packbuf);
+    return m;
+  }
+};
+
+// =====================================================================
+// Prover (ALICE) side
+// =====================================================================
+
+template <typename IO> class RamOSTripleProver : public RamOSTripleBase<IO> {
+public:
+  using Base = RamOSTripleBase<IO>;
+  using Base::party;
+  using Base::delta;
+  using Base::io;
+  using Base::ferret;
+  using Base::pack;
+  using Base::polyprdt;
+  using Base::ope_buf;
+  using Base::auth_buffer_val;
+  using Base::auth_buffer_mac;
+  using Base::andgate_buffer_left_val;
+  using Base::andgate_buffer_left_mac;
+  using Base::andgate_buffer_rght_val;
+  using Base::andgate_buffer_rght_mac;
+  using Base::authf2k_cnt;
+  using Base::check_cnt;
+  using Base::BUFFER_SZ;
+  using Base::pre_f2k_buffer_refill;
+
+  RamOSTripleProver(IO *io, FerretCOT *ferret) : Base(ALICE, io, ferret) {}
+
+  ~RamOSTripleProver() override {
+    if (check_cnt != 0) andgate_correctness_check_manage();
+  }
 
   void compute_add_const(block &valb, block &macb, const block &vala,
-                         const block &maca, const block &c) {
-    if (party == ALICE) {
-      valb = vala ^ c;
-      macb = maca;
-    } else {
-      block d;
-      gfmul(delta, c, &d);
-      macb = maca ^ d;
-    }
+                         const block &maca, const block &c) override {
+    // ALICE adds c on the cleartext side; mac is unchanged.
+    valb = vala ^ c;
+    macb = maca;
   }
 
   void compute_mul(block &valc, block &macc, block vala, block maca,
-                   block valb, block macb) {
+                   block valb, block macb) override {
     if (check_cnt == BUFFER_SZ) {
       andgate_correctness_check_manage();
       check_cnt = 0;
@@ -103,245 +211,208 @@ public:
     andgate_buffer_rght_mac[check_cnt] = macb;
 
     block d;
-    if (party == ALICE) {
-      gfmul(vala, valb, &valc);
-      d = valc ^ auth_buffer_val[authf2k_cnt];
-      auth_buffer_val[authf2k_cnt] = valc;
-      io->send_data(&d, sizeof(block));
-    } else {
-      io->recv_data(&d, sizeof(block));
-      gfmul(d, delta, &d);
-      auth_buffer_mac[authf2k_cnt] ^= d;
-    }
+    gfmul(vala, valb, &valc);
+    d = valc ^ auth_buffer_val[authf2k_cnt];
+    auth_buffer_val[authf2k_cnt] = valc;
+    io->send_data(&d, sizeof(block));
     macc = auth_buffer_mac[authf2k_cnt];
     check_cnt++;
     authf2k_cnt++;
   }
 
-  void compute_mul3(block &val, block &mac, block &vala, block &maca,
-                    block &valb, block &macb, block &valc, block &macc) {
-    block t0, v = zero_block, m;
-    uint64_t low = 0, high = 0;
-    Integer lowInt, highInt;
-    if (party == ALICE) {
-      gfmul(vala, valb, &v);
-      gfmul(valc, v, &v);
-      low = LOW64(v);
-      high = HIGH64(v);
-    }
-    lowInt = Integer(65, low, ALICE);
-    highInt = Integer(65, high, ALICE);
-    {
-      // GaloisFieldPacking::base[i] = X^i is no longer exposed on
-      // emp-tool main; pack.packing(res, data) over 128 wires
-      // computes the same Σ data[i]·X^i directly.
-      block packbuf[128];
-      memcpy(packbuf,      lowInt.bits.data(),  64 * sizeof(block));
-      memcpy(packbuf + 64, highInt.bits.data(), 64 * sizeof(block));
-      pack.packing(&m, packbuf);
-    }
-    polyprdt->polyPrdt3(vala, maca, valb, macb, valc, macc, m);
-    val = v;
-    mac = m;
+  block compute_mul_v3(block a, block b, block c) override {
+    block v;
+    gfmul(a, b, &v);
+    gfmul(c, v, &v);
+    return v;
+  }
+  block compute_mul_v4(block a, block b, block c, block d) override {
+    block v;
+    gfmul(a, b, &v);
+    gfmul(c, v, &v);
+    gfmul(d, v, &v);
+    return v;
+  }
+  block compute_mul_v5(block a, block b, block c, block d, block e) override {
+    block v;
+    gfmul(a, b, &v);
+    gfmul(c, v, &v);
+    gfmul(d, v, &v);
+    gfmul(e, v, &v);
+    return v;
   }
 
-  void compute_mul4(block &val, block &mac, block &vala, block &maca,
-                    block &valb, block &macb, block &valc, block &macc,
-                    block &vald, block &macd) {
-    block t0, v = zero_block, m;
-    uint64_t low = 0, high = 0;
-    Integer lowInt, highInt;
-    if (party == ALICE) {
-      gfmul(vala, valb, &v);
-      gfmul(valc, v, &v);
-      gfmul(vald, v, &v);
-      low = LOW64(v);
-      high = HIGH64(v);
-    }
-    lowInt = Integer(65, low, ALICE);
-    highInt = Integer(65, high, ALICE);
-    {
-      // GaloisFieldPacking::base[i] = X^i is no longer exposed on
-      // emp-tool main; pack.packing(res, data) over 128 wires
-      // computes the same Σ data[i]·X^i directly.
-      block packbuf[128];
-      memcpy(packbuf,      lowInt.bits.data(),  64 * sizeof(block));
-      memcpy(packbuf + 64, highInt.bits.data(), 64 * sizeof(block));
-      pack.packing(&m, packbuf);
-    }
-    polyprdt->polyPrdt4(vala, maca, valb, macb, valc, macc, vald, macd, m);
-    val = v;
-    mac = m;
-  }
-
-  void compute_mul5(block &val, block &mac, block &vala, block &maca,
-                    block &valb, block &macb, block &valc, block &macc,
-                    block &vald, block &macd, block &vale, block &mace) {
-    block t0, v = zero_block, m;
-    uint64_t low = 0, high = 0;
-    Integer lowInt, highInt;
-    if (party == ALICE) {
-      gfmul(vala, valb, &v);
-      gfmul(valc, v, &v);
-      gfmul(vald, v, &v);
-      gfmul(vale, v, &v);
-      low = LOW64(v);
-      high = HIGH64(v);
-    }
-    lowInt = Integer(65, low, ALICE);
-    highInt = Integer(65, high, ALICE);
-    {
-      // GaloisFieldPacking::base[i] = X^i is no longer exposed on
-      // emp-tool main; pack.packing(res, data) over 128 wires
-      // computes the same Σ data[i]·X^i directly.
-      block packbuf[128];
-      memcpy(packbuf,      lowInt.bits.data(),  64 * sizeof(block));
-      memcpy(packbuf + 64, highInt.bits.data(), 64 * sizeof(block));
-      pack.packing(&m, packbuf);
-    }
-    polyprdt->polyPrdt5(vala, maca, valb, macb, valc, macc, vald, macd, vale,
-                        mace, m);
-    val = v;
-    mac = m;
-  }
-
-  /* ---------------------check----------------------*/
-
-  void andgate_correctness_check_manage() {
+  void andgate_correctness_check_manage() override {
     io->flush();
     block seed = io->get_hash_block();
-    vector<future<void>> fut;
-
-    int share_seed_n = threads;
-    std::vector<block> share_seed(share_seed_n);
-    PRG(&seed).random_block(share_seed.data(), share_seed_n);
-
-    uint32_t task_base, leftover;
-    if (check_cnt < threads) {
-      task_base = 0;
-      leftover = check_cnt;
-    } else {
-      task_base = check_cnt / threads;
-      leftover = task_base + (check_cnt % task_base);
-    }
-    uint32_t start = 0;
-    std::vector<block> sum(2 * threads);
-    block *sum_p   = sum.data();
-    block *seeds_p = share_seed.data();
-    for (int i = 0; i < threads - 1; ++i) {
-      fut.push_back(
-          pool->enqueue([this, sum_p, i, start, task_base, seeds_p]() {
-            andgate_correctness_check(sum_p, i, start, task_base, seeds_p[i]);
-          }));
-      start += task_base;
-    }
-    andgate_correctness_check(sum_p, threads - 1, start, leftover,
-                              seeds_p[threads - 1]);
-
-    for (auto &f : fut)
-      f.get();
+    block sum[2] = { zero_block, zero_block };
+    andgate_correctness_check_alice(sum, check_cnt, seed);
 
     if (ope_buf.empty()) ope_buf.resize(ferret->chunk_ots());
-    // ferret_party = 3-party; ferret is the OT-sender exactly when this side is BOB.
-    if (party == BOB) ferret->rcot_send_next(ope_buf.data());
-    else              ferret->rcot_recv_next(ope_buf.data());
+    // Prover side: ferret is BOB → OT-receiver → use rcot_recv_next.
+    ferret->rcot_recv_next(ope_buf.data());
     block *ope_data = ope_buf.data();
-    if (party == ALICE) {
-      uint64_t ch_bits[2];
-      for (int i = 0; i < 2; ++i) {
-        if (getLSB(ope_data[64 * i + 63]))
-          ch_bits[i] = 1;
-        else
-          ch_bits[i] = 0;
-        for (int j = 62; j >= 0; --j) {
-          ch_bits[i] <<= 1;
-          if (getLSB(ope_data[64 * i + j]))
-            ch_bits[i]++;
-        }
+    uint64_t ch_bits[2];
+    for (int i = 0; i < 2; ++i) {
+      ch_bits[i] = getLSB(ope_data[64 * i + 63]) ? 1 : 0;
+      for (int j = 62; j >= 0; --j) {
+        ch_bits[i] <<= 1;
+        if (getLSB(ope_data[64 * i + j])) ch_bits[i]++;
       }
-      block A_star[2];
-      A_star[1] = makeBlock(ch_bits[1], ch_bits[0]);
-      pack.packing(A_star, ope_data);
-      for (int i = 0; i < threads; ++i) {
-        A_star[0] = A_star[0] ^ sum[2 * i];
-        A_star[1] = A_star[1] ^ sum[2 * i + 1];
-      }
-      io->send_data(A_star, 2 * sizeof(block));
-    } else {
-      block B_star;
-      pack.packing(&B_star, ope_data);
-      for (int i = 0; i < threads; ++i)
-        B_star = B_star ^ sum[i];
-      block A_star[2];
-      io->recv_data(A_star, 2 * sizeof(block));
-      block W;
-      gfmul(A_star[1], this->delta, &W);
-      W = W ^ A_star[0];
-      if (cmpBlock(&W, &B_star, 1) != 1)
-        error("emp_zk_bool AND batch check");
     }
+    block A_star[2];
+    A_star[1] = makeBlock(ch_bits[1], ch_bits[0]);
+    pack.packing(A_star, ope_data);
+    A_star[0] = A_star[0] ^ sum[0];
+    A_star[1] = A_star[1] ^ sum[1];
+    io->send_data(A_star, 2 * sizeof(block));
     io->flush();
   }
 
-  void andgate_correctness_check(block *ret, int thr_i, uint32_t start,
-                                 uint32_t task_n, block chi_seed) {
-    if (task_n == 0)
-      return;
+private:
+  void andgate_correctness_check_alice(block *ret, uint32_t task_n,
+                                       block chi_seed) {
+    if (task_n == 0) return;
     block *lval = andgate_buffer_left_val.data();
     block *lmac = andgate_buffer_left_mac.data();
     block *rval = andgate_buffer_rght_val.data();
     block *rmac = andgate_buffer_rght_mac.data();
     block *omac = auth_buffer_mac.data() + authf2k_cnt - check_cnt;
 
-    if (party == ALICE) {
-      for (uint32_t i = start; i < start + task_n; ++i) {
-        block A0, A1, tmp;
-        gfmul(lmac[i], rmac[i], &A0);
-        gfmul(lval[i], rmac[i], &tmp);
-        gfmul(rval[i], lmac[i], &A1);
-        A1 = A1 ^ tmp;
-        A1 = A1 ^ omac[i];
-        lval[i] = A0;
-        rval[i] = A1;
-      }
-    } else {
-      for (uint32_t i = start; i < start + task_n; ++i) {
-        block B, tmp;
-        gfmul(lmac[i], rmac[i], &B);
-        gfmul(omac[i], delta, &tmp);
-        B = B ^ tmp;
-        lval[i] = B;
-      }
+    for (uint32_t i = 0; i < task_n; ++i) {
+      block A0, A1, tmp;
+      gfmul(lmac[i], rmac[i], &A0);
+      gfmul(lval[i], rmac[i], &tmp);
+      gfmul(rval[i], lmac[i], &A1);
+      A1 = A1 ^ tmp;
+      A1 = A1 ^ omac[i];
+      lval[i] = A0;
+      rval[i] = A1;
     }
 
     std::vector<block> chi(task_n);
     uni_hash_coeff_gen(chi.data(), chi_seed, task_n);
-    if (party == ALICE) {
-      vector_inn_prdt_sum_red(ret + 2 * thr_i, chi.data(), lval + start, task_n);
-      vector_inn_prdt_sum_red(ret + 2 * thr_i + 1, chi.data(), rval + start, task_n);
-    } else
-      vector_inn_prdt_sum_red(ret + thr_i, chi.data(), lval + start, task_n);
-  }
-
-  /* ---------------------helper functions----------------------*/
-
-  void pre_f2k_buffer_refill() {
-    svole->extend_inplace(auth_buffer_val.data(), auth_buffer_mac.data(), BUFFER_MEM_SZ);
-    authf2k_cnt = 0;
-  }
-
-  bool andgate_buf_not_empty() {
-    if (check_cnt == 0)
-      return false;
-    else
-      return true;
-  }
-
-  void sync() {
-    io->flush();
-    for (int i = 0; i < threads; ++i) {
-      ios[i]->flush();
-    }
+    vector_inn_prdt_sum_red(ret + 0, chi.data(), lval, task_n);
+    vector_inn_prdt_sum_red(ret + 1, chi.data(), rval, task_n);
   }
 };
+
+// =====================================================================
+// Verifier (BOB) side
+// =====================================================================
+
+template <typename IO> class RamOSTripleVerifier : public RamOSTripleBase<IO> {
+public:
+  using Base = RamOSTripleBase<IO>;
+  using Base::party;
+  using Base::delta;
+  using Base::io;
+  using Base::ferret;
+  using Base::pack;
+  using Base::polyprdt;
+  using Base::ope_buf;
+  using Base::auth_buffer_val;
+  using Base::auth_buffer_mac;
+  using Base::andgate_buffer_left_val;
+  using Base::andgate_buffer_left_mac;
+  using Base::andgate_buffer_rght_val;
+  using Base::andgate_buffer_rght_mac;
+  using Base::authf2k_cnt;
+  using Base::check_cnt;
+  using Base::BUFFER_SZ;
+  using Base::pre_f2k_buffer_refill;
+
+  RamOSTripleVerifier(IO *io, FerretCOT *ferret) : Base(BOB, io, ferret) {}
+
+  ~RamOSTripleVerifier() override {
+    if (check_cnt != 0) andgate_correctness_check_manage();
+  }
+
+  void compute_add_const(block &valb, block &macb, const block &,
+                         const block &maca, const block &c) override {
+    block d;
+    gfmul(delta, c, &d);
+    macb = maca ^ d;
+    valb = zero_block;     // verifier has no cleartext
+  }
+
+  void compute_mul(block &valc, block &macc, block vala, block maca,
+                   block valb, block macb) override {
+    if (check_cnt == BUFFER_SZ) {
+      andgate_correctness_check_manage();
+      check_cnt = 0;
+    }
+    if (authf2k_cnt == BUFFER_SZ) {
+      pre_f2k_buffer_refill();
+      authf2k_cnt = 0;
+    }
+    // Verifier doesn't touch the val buffers in andgate_correctness_check_bob,
+    // but populate them anyway to keep the buffer shape symmetric with the
+    // prover side.
+    andgate_buffer_left_val[check_cnt] = vala;
+    andgate_buffer_left_mac[check_cnt] = maca;
+    andgate_buffer_rght_val[check_cnt] = valb;
+    andgate_buffer_rght_mac[check_cnt] = macb;
+
+    block d;
+    io->recv_data(&d, sizeof(block));
+    gfmul(d, delta, &d);
+    auth_buffer_mac[authf2k_cnt] ^= d;
+    valc = zero_block;
+    macc = auth_buffer_mac[authf2k_cnt];
+    check_cnt++;
+    authf2k_cnt++;
+  }
+
+  // Verifier doesn't have cleartext values — v is the zero block.
+  block compute_mul_v3(block, block, block) override { return zero_block; }
+  block compute_mul_v4(block, block, block, block) override { return zero_block; }
+  block compute_mul_v5(block, block, block, block, block) override { return zero_block; }
+
+  void andgate_correctness_check_manage() override {
+    io->flush();
+    block seed = io->get_hash_block();
+    block sum[2] = { zero_block, zero_block };
+    andgate_correctness_check_bob(sum, check_cnt, seed);
+
+    if (ope_buf.empty()) ope_buf.resize(ferret->chunk_ots());
+    // Verifier side: ferret is ALICE → OT-sender → use rcot_send_next.
+    ferret->rcot_send_next(ope_buf.data());
+    block *ope_data = ope_buf.data();
+    block B_star;
+    pack.packing(&B_star, ope_data);
+    B_star = B_star ^ sum[0];
+    block A_star[2];
+    io->recv_data(A_star, 2 * sizeof(block));
+    block W;
+    gfmul(A_star[1], delta, &W);
+    W = W ^ A_star[0];
+    if (cmpBlock(&W, &B_star, 1) != 1)
+      error("emp_zk_bool AND batch check");
+    io->flush();
+  }
+
+private:
+  void andgate_correctness_check_bob(block *ret, uint32_t task_n,
+                                     block chi_seed) {
+    if (task_n == 0) return;
+    block *lmac = andgate_buffer_left_mac.data();
+    block *rmac = andgate_buffer_rght_mac.data();
+    block *omac = auth_buffer_mac.data() + authf2k_cnt - check_cnt;
+    block *lval = andgate_buffer_left_val.data();   // reused as scratch
+
+    for (uint32_t i = 0; i < task_n; ++i) {
+      block B, tmp;
+      gfmul(lmac[i], rmac[i], &B);
+      gfmul(omac[i], delta, &tmp);
+      B = B ^ tmp;
+      lval[i] = B;
+    }
+
+    std::vector<block> chi(task_n);
+    uni_hash_coeff_gen(chi.data(), chi_seed, task_n);
+    vector_inn_prdt_sum_red(ret + 0, chi.data(), lval, task_n);
+  }
+};
+
 #endif

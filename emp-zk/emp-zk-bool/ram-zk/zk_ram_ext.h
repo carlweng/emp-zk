@@ -1,10 +1,10 @@
-#ifndef ZK_RAM_EXT_H__
-#define ZK_RAM_EXT_H__
+#ifndef EMP_ZK_RAM_EXT_H__
+#define EMP_ZK_RAM_EXT_H__
 #include "emp-zk/emp-zk-bool/zk_bool_base.h"
 #include "emp-zk/emp-zk-bool/ram-zk/gf_base.h"
 #include "emp-zk/emp-zk-bool/ram-zk/ostriple.h"
 
-template <typename IO> class ZkRamExt {
+template <typename IO> class ZKRamExt {
 public:
   const std::size_t index_bit_sz = 32;
   const std::size_t step_bit_sz = 31;
@@ -19,9 +19,9 @@ public:
   IO *io;
   block Delta;
   GaloisFieldPacking gfp;
-  F2kOSTriple<IO> *ostriple = nullptr;
+  RamOSTripleBase<IO> *ostriple = nullptr;
   // double online = 0, check1 = 0, check2 = 0;
-  ZkRamExt(int _party, int _index_sz, int _step_sz, std::size_t _val_sz)
+  ZKRamExt(int _party, int _index_sz, int _step_sz, std::size_t _val_sz)
       : party(_party), index_sz(_index_sz), step_sz(_step_sz), val_sz(_val_sz) {
     /*if(_val_sz % 64 != 0) {
         throw invalid_argument("input size in bytes should be divided by 8");
@@ -34,11 +34,10 @@ public:
     io = exec->io;
     Delta = exec->delta;
     ostriple =
-        new F2kOSTriple<IO>(party, /*threads=*/1, &exec->io,
-                            exec->ferret, /*pool=*/nullptr);
+        (party == ALICE ? static_cast<RamOSTripleBase<IO>*>(new RamOSTripleProver<IO>(exec->io, exec->ferret)) : static_cast<RamOSTripleBase<IO>*>(new RamOSTripleVerifier<IO>(exec->io, exec->ferret)));
   }
 
-  ~ZkRamExt() { delete ostriple; }
+  ~ZKRamExt() { delete ostriple; }
 
   // pack committed F_2 values into F_{2^128} values
   // ((index, step, op, val[0]), (val[1], val[2]), ...)
@@ -358,4 +357,4 @@ public:
     // check2 += time_from(t1);
   }
 };
-#endif // ZK_RAM_EXT_H__
+#endif // EMP_ZK_RAM_EXT_H__

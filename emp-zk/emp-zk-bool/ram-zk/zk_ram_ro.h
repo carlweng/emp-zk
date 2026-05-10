@@ -1,10 +1,10 @@
-#ifndef RO_ZK_RAM_H__
-#define RO_ZK_RAM_H__
+#ifndef EMP_ZK_RAM_RO_H__
+#define EMP_ZK_RAM_RO_H__
 #include "emp-zk/emp-zk-bool/zk_bool_base.h"
 #include "emp-zk/emp-zk-bool/ram-zk/gf_base.h"
 #include "emp-zk/emp-zk-bool/ram-zk/ostriple.h"
 
-template <typename IO> class ROZKRAM {
+template <typename IO> class ZKRamRO {
 public:
   double check1 = 0, check2 = 0, check3 = 0;
   int party;
@@ -16,18 +16,17 @@ public:
   GaloisFieldPacking gp;
   IO *io;
   block Delta;
-  F2kOSTriple<IO> *ostriple = nullptr;
-  ROZKRAM(int _party, int index_sz, int val_sz)
+  RamOSTripleBase<IO> *ostriple = nullptr;
+  ZKRamRO(int _party, int index_sz, int val_sz)
       : party(_party), index_sz(index_sz), val_sz(val_sz) {
     auto *exec = emp::get_bool_backend();
     io = exec->io;
     Delta = exec->delta;
     ostriple =
-        new F2kOSTriple<IO>(party, /*threads=*/1, &exec->io,
-                            exec->ferret, /*pool=*/nullptr);
+        (party == ALICE ? static_cast<RamOSTripleBase<IO>*>(new RamOSTripleProver<IO>(exec->io, exec->ferret)) : static_cast<RamOSTripleBase<IO>*>(new RamOSTripleVerifier<IO>(exec->io, exec->ferret)));
   }
 
-  ~ROZKRAM() { delete ostriple; }
+  ~ZKRamRO() { delete ostriple; }
 
   void init(vector<Integer> &data) {
     uint64_t val = 0;
@@ -244,4 +243,4 @@ public:
     }
   }
 };
-#endif // RO_ZK_RAM_H__
+#endif // EMP_ZK_RAM_RO_H__

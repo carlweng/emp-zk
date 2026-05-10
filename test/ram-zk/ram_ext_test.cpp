@@ -10,8 +10,8 @@ int index_sz = 5, step_sz = 18, val_sz = 128;
 
 void test(BoolIO *ios[threads], int party) {
   setup_zk_bool(ios[0], party);
-  ZkRamExt<BoolIO> *ram =
-      new ZkRamExt<BoolIO>(party, index_sz, step_sz, val_sz);
+  ZKRamExt<BoolIO> *ram =
+      new ZKRamExt<BoolIO>(party, index_sz, step_sz, val_sz);
 
   uint64_t block_sz = (val_sz + 63) / 64;
   vector<Integer> val(block_sz);

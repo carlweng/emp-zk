@@ -57,7 +57,7 @@ public:
   // Backend-owned RCOT buffer fed by the streaming API. The backend
   // holds one long-lived ferret session open from ctor to dtor;
   // take_rcot drains rcot_buf and refills via rcot_*_next when empty.
-  // Other consumers that share `ferret` (PolyProof / F2kOSTriple /
+  // Other consumers that share `ferret` (PolyProof / RamOSTriple /
   // BaseSVoleF2k) call rcot_*_next directly with their own scratch.
   //
   // Refill granularity: each refill calls rcot_*_next K times in a
@@ -119,7 +119,7 @@ public:
     andgate_right_buffer.resize(CHECK_SZ);
 
     // Open the long-lived ferret RCOT session (ctor → dtor scope).
-    // take_rcot and any other consumer (PolyProof, F2kOSTriple,
+    // take_rcot and any other consumer (PolyProof, RamOSTriple,
     // BaseSVoleF2k) drain from this single session via rcot_*_next.
     if (ferret_is_sender) ferret->rcot_send_begin();
     else                  ferret->rcot_recv_begin();

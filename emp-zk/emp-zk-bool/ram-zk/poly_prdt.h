@@ -78,214 +78,78 @@ public:
     num = 0;
   }
 
-  inline void polyPrdt3(block &x1, block &m1, block &x2, block &m2, block &x3,
-                        block &m3, block &m4) {
-    if (num >= buffer_sz)
-      batch_check();
+  // Templated polynomial-product MAC step.
+  //
+  // x[0..N-1], m[0..N-1] are the prover's (cleartext, MAC) pairs for N
+  // committed values; m_last is the MAC the prover commits as the
+  // product. Both sides build coefficients of the polynomial-in-Δ
+  //
+  //     P(Δ) = (k_1 + x_1 Δ)(k_2 + x_2 Δ) … (k_N + x_N Δ)
+  //
+  // (with k_i ≡ m_i in this code's spelling). The Δ^N coefficient is
+  // x_1·x_2·…·x_N (the cleartext product, available to the caller as
+  // `v`); we buffer the lower coefficients 0..N-1. The Δ^(N-1) slot
+  // also folds in the m_last correction term so that
+  //   buffer_{N-1} − m_last = coefficient of Δ^(N-1).
+  // Higher-index buffers (N..4) are zeroed so batch_check's later
+  // chi-fold sees a clean degree-N polynomial regardless of N.
+  //
+  // ALICE expands the polynomial iteratively
+  //   poly_{i+1}[j] = poly_i[j] · k_{i+1} + poly_i[j-1] · x_{i+1}.
+  // BOB stores only B = ⊓_i m_i + m_last · Δ^(N-1) in buffer0.
+  template <int N>
+  inline void polyPrdtN(const block *x, const block *m, const block &m_last) {
+    static_assert(N >= 3 && N <= 5);
+    if (num >= buffer_sz) batch_check();
 
     if (party == ALICE) {
-      block a[5], b[5], c[5];
+      block poly[N + 1] = {};
+      block tmp;
 
-      a[0] = a[1] = m1;
-      a[2] = m2;
-      a[3] = x1;
-      b[0] = m2;
-      b[1] = b[3] = x2;
-      b[2] = x1;
-      for (int i = 0; i < 4; ++i) gfmul(a[i], b[i], &c[i]);
-      c[2] ^= c[1];
+      // Hand-expand the 2-term init: poly = (k_1 + x_1 Δ)(k_2 + x_2 Δ).
+      gfmul(m[0], m[1], &poly[0]);
+      gfmul(m[0], x[1], &poly[1]);
+      gfmul(x[0], m[1], &tmp);
+      poly[1] ^= tmp;
+      gfmul(x[0], x[1], &poly[2]);
 
-      a[0] = a[1] = c[0];
-      a[2] = a[3] = c[2];
-      a[4] = c[3];
-      b[0] = b[2] = b[4] = m3;
-      b[1] = b[3] = x3;
-      for (int i = 0; i < 5; ++i) gfmul(a[i], b[i], &c[i]);
+      // Iteratively multiply in (k_i + x_i Δ) for i = 2 .. N-1.
+      for (int i = 2; i < N; ++i) {
+        block new_poly[N + 1] = {};
+        // At the LAST step (i == N-1) the new top coefficient
+        // new_poly[N] = poly[N-1] · x_i would be the all-x term =
+        // x_1·…·x_N = v, which the caller already has; skip it.
+        const int top = (i == N - 1) ? (N - 1) : (i + 1);
+        for (int j = 0; j <= top; ++j) {
+          if (j <= i)
+            gfmul(poly[j], m[i], &new_poly[j]);
+          if (j >= 1) {
+            gfmul(poly[j - 1], x[i], &tmp);
+            new_poly[j] ^= tmp;
+          }
+        }
+        for (int j = 0; j <= top; ++j) poly[j] = new_poly[j];
+      }
 
-      buffer0[num] = c[0];
-      buffer1[num] = c[1] ^ c[2];
-      buffer2[num] = c[3] ^ c[4] ^ m4;
-      buffer3[num] = zero_block;
-      buffer4[num] = zero_block;
+      // Coefficient layout: poly[0..N-1] → buffer0..buffer(N-1), with
+      // buffer(N-1) folding in m_last; buffer(N..4) zeroed.
+      block out[5];
+      for (int j = 0; j < N - 1; ++j) out[j] = poly[j];
+      out[N - 1] = poly[N - 1] ^ m_last;
+      for (int j = N; j < 5; ++j) out[j] = zero_block;
+      buffer0[num] = out[0];
+      buffer1[num] = out[1];
+      buffer2[num] = out[2];
+      buffer3[num] = out[3];
+      buffer4[num] = out[4];
     } else {
-      block B = zero_block;
-      block t0, t1;
-
-      gfmul(m1, m2, &t0);
-      gfmul(t0, m3, &t0);
-
-      gfmul(m4, delta[1], &t1);
-
-      B = t0 ^ t1;
-
-      buffer0[num] = B;
-    }
-    num++;
-  }
-
-  inline void polyPrdt4(block &x1, block &m1, block &x2, block &m2, block &x3,
-                        block &m3, block &x4, block &m4, block &m5) {
-    if (num >= buffer_sz)
-      batch_check();
-
-    if (party == ALICE) {
-      block a[7], b[7], c[7];
-
-      a[0] = a[1] = m1;
-      a[2] = m2;
-      a[3] = x1;
-      b[0] = m2;
-      b[1] = b[3] = x2;
-      b[2] = x1;
-      for (int i = 0; i < 4; ++i) gfmul(a[i], b[i], &c[i]);
-      c[2] ^= c[1];
-
-      a[0] = a[1] = c[0];
-      a[2] = a[3] = c[2];
-      a[4] = a[5] = c[3];
-      b[0] = b[2] = b[4] = m3;
-      b[1] = b[3] = b[5] = x3;
-      for (int i = 0; i < 6; ++i) gfmul(a[i], b[i], &c[i]);
-      c[2] ^= c[1];
-      c[4] ^= c[3];
-      // c[0] = t4 = m1m2m3
-      // c[2] = t5 = m1m2x3+m1m3x2+m2m3x1
-      // c[4] = t8 = m1x2x3+m2x1x3+m3x1x2
-      // c[5] = t11 = x1x2x3
-
-      a[0] = a[1] = c[0];
-      a[2] = a[4] = c[2];
-      a[3] = a[5] = c[4];
-      a[6] = c[5];
-      b[0] = b[2] = b[3] = b[6] = m4;
-      b[1] = b[4] = b[5] = x4;
-      for (int i = 0; i < 7; ++i) gfmul(a[i], b[i], &c[i]);
-      c[2] ^= c[1];
-      c[4] ^= c[3];
-      c[6] ^= c[5];
-      // c[0] = m1m2m3m4
-      // c[2] = coefficient of \Delta
-      // c[4] = coefficient of \Delta^2
-      // c[6] = coefficient of \Delta^3
-
-      buffer0[num] = c[0];
-      buffer1[num] = c[2];
-      buffer2[num] = c[4];
-      buffer3[num] = c[6] ^ m5;
-      buffer4[num] = zero_block;
-    } else {
-      block B = zero_block;
-      block t0, t1;
-
-      gfmul(m1, m2, &t0);
-      gfmul(t0, m3, &t0);
-      gfmul(t0, m4, &t0);
-
-      gfmul(m5, delta[2], &t1);
-
-      B = t0 ^ t1;
-
-      buffer0[num] = B;
-    }
-    num++;
-  }
-
-  inline void polyPrdt5(block &x1, block &m1, block &x2, block &m2, block &x3,
-                        block &m3, block &x4, block &m4, block &x5, block &m5,
-                        block &m6) {
-    if (num >= buffer_sz)
-      batch_check();
-
-    if (party == ALICE) {
-      block c[6], d[6];
-
-      // gfmul4(m1, m1, m2, x1, m2, x2, x1, x2, c);
-      gfmul(m1, m2, &c[0]);
-      gfmul(m1, x2, &c[1]);
-      gfmul(m2, x1, &c[2]);
-      gfmul(x1, x2, &c[3]);
-      c[2] ^= c[1];
-
-      // gfmul6(c[0], c[0], c[2], c[2], c[3], c[3], m3, x3, m3, x3, m3, x3, c);
-      {
-        block c0 = c[0], c2 = c[2], c3 = c[3];
-        gfmul(c0, m3, &c[0]);
-        gfmul(c0, x3, &c[1]);
-        gfmul(c2, m3, &c[2]);
-        gfmul(c2, x3, &c[3]);
-        gfmul(c3, m3, &c[4]);
-        gfmul(c3, x3, &c[5]);
-      }
-      c[2] ^= c[1];
-      c[4] ^= c[3];
-      // c[0] = t4 = m1m2m3
-      // c[2] = t5 = m1m2x3+m1m3x2+m2m3x1
-      // c[4] = t8 = m1x2x3+m2x1x3+m3x1x2
-      // c[5] = t11 = x1x2x3
-
-      // gfmul4(c[0], c[0], c[2], c[4], m4, x4, m4, m4, d);
-      gfmul(c[0], m4, &d[0]);
-      gfmul(c[0], x4, &d[1]);
-      gfmul(c[2], m4, &d[2]);
-      gfmul(c[4], m4, &d[3]);
-      // gfmul4(c[2], c[4], c[5], c[5], x4, x4, m4, x4, c);
-      {
-        block c0_in = c[2], c1_in = c[4], c2_in = c[5];
-        gfmul(c0_in, x4, &c[0]);
-        gfmul(c1_in, x4, &c[1]);
-        gfmul(c2_in, m4, &c[2]);
-        gfmul(c2_in, x4, &c[3]);
-      }
-      d[2] ^= d[1];
-      c[0] ^= d[3];
-      c[2] ^= c[1];
-      // d[0] = t12 = m1m2m3m4
-      // d[2] = t14 = coefficient of \Delta
-      // c[0] = t16 = coefficient of \Delta^2
-      // c[2] = t18 = coefficient of \Delta^3
-      // c[3] = t19 = x1x2x3x4
-
-      // gfmul6(d[0], d[0], d[2], c[0], d[2], c[2], m5, x5, m5, m5, x5, m5, d);
-      {
-        block d0 = d[0], d2 = d[2], c0_in = c[0], c2_in = c[2];
-        gfmul(d0,    m5, &d[0]);
-        gfmul(d0,    x5, &d[1]);
-        gfmul(d2,    m5, &d[2]);
-        gfmul(c0_in, m5, &d[3]);
-        gfmul(d2,    x5, &d[4]);
-        gfmul(c2_in, m5, &d[5]);
-      }
-      // gfmul3(c[0], c[3], c[2], x5, m5, x5, c);
-      {
-        block c0_in = c[0], c1_in = c[3], c2_in = c[2];
-        gfmul(c0_in, x5, &c[0]);
-        gfmul(c1_in, m5, &c[1]);
-        gfmul(c2_in, x5, &c[2]);
-      }
-      // d[0] = m1m2m3m4m5
-      // d[2] + d[1] = coefficient of \Delta
-      // d[4] + d[3] = coefficient of \Delta^2
-      // c[0] + d[5] = coefficient of \Delta^3
-      // c[2] + c[1] + m6 = coefficient of \Delta^3
-      buffer0[num] = d[0];
-      buffer1[num] = d[2] ^ d[1];
-      buffer2[num] = d[4] ^ d[3];
-      buffer3[num] = c[0] ^ d[5];
-      buffer4[num] = c[2] ^ c[1] ^ m6;
-    } else {
-      block B = zero_block;
-      block t0, t1;
-
-      gfmul(m1, m2, &t0);
-      gfmul(t0, m3, &t0);
-      gfmul(t0, m4, &t0);
-      gfmul(t0, m5, &t0);
-
-      gfmul(m6, delta[3], &t1);
-
-      B = t0 ^ t1;
-
-      buffer0[num] = B;
+      block prod = m[0];
+      for (int i = 1; i < N; ++i) gfmul(prod, m[i], &prod);
+      // delta[k] = Δ^(k+1) (delta[0]=Δ, delta[1]=Δ², …);
+      // delta[N-2] = Δ^(N-1).
+      block adj;
+      gfmul(m_last, delta[N - 2], &adj);
+      buffer0[num] = prod ^ adj;
     }
     num++;
   }

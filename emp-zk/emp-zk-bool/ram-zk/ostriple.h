@@ -93,44 +93,41 @@ public:
   virtual void compute_mul(block &valc, block &macc, block vala, block maca,
                            block valb, block macb) = 0;
 
-  // ALICE returns the actual polynomial value a*b[*c[*d[*e]]]; BOB returns
-  // zero_block. Drives the shared compute_mul{3,4,5} bodies below.
-  virtual block compute_mul_v3(block a, block b, block c) = 0;
-  virtual block compute_mul_v4(block a, block b, block c, block d) = 0;
-  virtual block compute_mul_v5(block a, block b, block c, block d, block e) = 0;
+  // Polynomial-value hook: ALICE returns ⊗_i vals[i] (gfmul chain over
+  // the N input cleartext blocks); BOB returns zero_block (it has no
+  // cleartext). Drives the templated compute_mul_poly<N> below.
+  virtual block compute_mul_v(int N, const block *vals) = 0;
 
-  // ---- Shared compute_mul{3,4,5} bodies --------------------------------
+  // ---- compute_mul_poly<N> ---------------------------------------------
   //
-  // Both roles run the same packing + polyPrdt machinery; the only
-  // difference is the value of v (zero on the verifier). Hoisted into
-  // the base via the compute_mul_v* hooks above.
+  // One templated entry point covering the former compute_mul{3,4,5}.
+  // N is the number of (val, mac) input pairs; the variadic `args`
+  // takes them interleaved in the same shape the call sites used:
+  //   compute_mul_poly(out_val, out_mac, v1, m1, v2, m2, …, vN, mN)
+  // N is deduced from the variadic count (sizeof...(args) / 2).
 
-  void compute_mul3(block &val, block &mac, block &vala, block &maca,
-                    block &valb, block &macb, block &valc, block &macc) {
-    block v = compute_mul_v3(vala, valb, valc);
-    block m = pack_v(v);
-    polyprdt->polyPrdt3(vala, maca, valb, macb, valc, macc, m);
-    val = v;
-    mac = m;
-  }
+  template <typename... Args>
+  void compute_mul_poly(block &val, block &mac, Args... args) {
+    static_assert(sizeof...(args) % 2 == 0,
+                  "compute_mul_poly expects (val, mac) pairs");
+    constexpr int N = sizeof...(args) / 2;
+    static_assert(N >= 3 && N <= 5,
+                  "compute_mul_poly supports N=3, 4, 5 (matches polyPrdt3/4/5)");
 
-  void compute_mul4(block &val, block &mac, block &vala, block &maca,
-                    block &valb, block &macb, block &valc, block &macc,
-                    block &vald, block &macd) {
-    block v = compute_mul_v4(vala, valb, valc, vald);
-    block m = pack_v(v);
-    polyprdt->polyPrdt4(vala, maca, valb, macb, valc, macc, vald, macd, m);
-    val = v;
-    mac = m;
-  }
+    // Pack the variadic into a flat 2N-block array, then split into
+    // (vals, macs); polyPrdtN takes the val and mac sides separately
+    // and the v-hook only needs vals.
+    block flat[2 * N] = { static_cast<block>(args)... };
+    block vals[N], macs[N];
+    for (int i = 0; i < N; ++i) {
+      vals[i] = flat[2 * i];
+      macs[i] = flat[2 * i + 1];
+    }
 
-  void compute_mul5(block &val, block &mac, block &vala, block &maca,
-                    block &valb, block &macb, block &valc, block &macc,
-                    block &vald, block &macd, block &vale, block &mace) {
-    block v = compute_mul_v5(vala, valb, valc, vald, vale);
+    block v = compute_mul_v(N, vals);
     block m = pack_v(v);
-    polyprdt->polyPrdt5(vala, maca, valb, macb, valc, macc, vald, macd,
-                        vale, mace, m);
+    polyprdt->template polyPrdtN<N>(vals, macs, m);
+
     val = v;
     mac = m;
   }
@@ -220,25 +217,10 @@ public:
     authf2k_cnt++;
   }
 
-  block compute_mul_v3(block a, block b, block c) override {
-    block v;
-    gfmul(a, b, &v);
-    gfmul(c, v, &v);
-    return v;
-  }
-  block compute_mul_v4(block a, block b, block c, block d) override {
-    block v;
-    gfmul(a, b, &v);
-    gfmul(c, v, &v);
-    gfmul(d, v, &v);
-    return v;
-  }
-  block compute_mul_v5(block a, block b, block c, block d, block e) override {
-    block v;
-    gfmul(a, b, &v);
-    gfmul(c, v, &v);
-    gfmul(d, v, &v);
-    gfmul(e, v, &v);
+  // Prover: chain-multiply N values: v = vals[0] * vals[1] * … * vals[N-1].
+  block compute_mul_v(int N, const block *vals) override {
+    block v = vals[0];
+    for (int i = 1; i < N; ++i) gfmul(vals[i], v, &v);
     return v;
   }
 
@@ -364,10 +346,8 @@ public:
     authf2k_cnt++;
   }
 
-  // Verifier doesn't have cleartext values — v is the zero block.
-  block compute_mul_v3(block, block, block) override { return zero_block; }
-  block compute_mul_v4(block, block, block, block) override { return zero_block; }
-  block compute_mul_v5(block, block, block, block, block) override { return zero_block; }
+  // Verifier: no cleartext, so v is always zero.
+  block compute_mul_v(int, const block *) override { return zero_block; }
 
   void andgate_correctness_check_manage() override {
     io->flush();

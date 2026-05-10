@@ -145,7 +145,7 @@ public:
         t[j] = (block)X[i + j];
         ostriple->compute_add_const(x[j], m[j], t[j], MAC[i + j], r);
       }
-      ostriple->compute_mul3(xx, mm, x[0], m[0], x[1], m[1], xx, mm);
+      ostriple->compute_mul_poly(xx, mm, x[0], m[0], x[1], m[1], xx, mm);
       i += 2;
     }
     while (i < list.size()) {
@@ -167,7 +167,7 @@ public:
         t[j] = (block)X[i + j];
         ostriple->compute_add_const(x[j], m[j], t[j], MAC[i + j], r);
       }
-      ostriple->compute_mul4(xx, mm, x[0], m[0], x[1], m[1], x[2], m[2], xx,
+      ostriple->compute_mul_poly(xx, mm, x[0], m[0], x[1], m[1], x[2], m[2], xx,
                              mm);
       i += 3;
     }
@@ -190,7 +190,7 @@ public:
         t[j] = (block)X[i + j];
         ostriple->compute_add_const(x[j], m[j], t[j], MAC[i + j], r);
       }
-      ostriple->compute_mul5(xx, mm, x[0], m[0], x[1], m[1], x[2], m[2], x[3],
+      ostriple->compute_mul_poly(xx, mm, x[0], m[0], x[1], m[1], x[2], m[2], x[3],
                              m[3], xx, mm);
       i += 4;
     }

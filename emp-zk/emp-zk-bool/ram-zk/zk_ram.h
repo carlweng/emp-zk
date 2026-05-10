@@ -213,7 +213,7 @@ public:
       while (i < step - 1) {
         ostriple->compute_add_const(x[0], m[0], X[i], MAC[i], r);
         ostriple->compute_add_const(x[1], m[1], X[i + 1], MAC[i + 1], r);
-        ostriple->compute_mul3(val, mac, val, mac, x[0], m[0], x[1], m[1]);
+        ostriple->compute_mul_poly(val, mac, val, mac, x[0], m[0], x[1], m[1]);
         i += 2;
       }
       while (i < step) {
@@ -227,7 +227,7 @@ public:
       while (i < step - 1) {
         ostriple->compute_add_const(x[0], m[0], dummy, MAC[i], r);
         ostriple->compute_add_const(x[1], m[1], dummy, MAC[i + 1], r);
-        ostriple->compute_mul3(val, mac, val, mac, x[0], m[0], x[1], m[1]);
+        ostriple->compute_mul_poly(val, mac, val, mac, x[0], m[0], x[1], m[1]);
         i += 2;
       }
       while (i < step) {
@@ -247,7 +247,7 @@ public:
       while (i < step - 2) {
         for (int j = 0; j < 3; ++j)
           ostriple->compute_add_const(x[j], m[j], X[i + j], MAC[i + j], r);
-        ostriple->compute_mul4(val, mac, val, mac, x[0], m[0], x[1], m[1], x[2],
+        ostriple->compute_mul_poly(val, mac, val, mac, x[0], m[0], x[1], m[1], x[2],
                                m[2]);
         i += 3;
       }
@@ -262,7 +262,7 @@ public:
       while (i < step - 2) {
         for (int j = 0; j < 3; ++j)
           ostriple->compute_add_const(x[j], m[j], dummy, MAC[i + j], r);
-        ostriple->compute_mul4(val, mac, val, mac, x[0], m[0], x[1], m[1], x[2],
+        ostriple->compute_mul_poly(val, mac, val, mac, x[0], m[0], x[1], m[1], x[2],
                                m[2]);
         i += 3;
       }
@@ -283,7 +283,7 @@ public:
       while (i < step - 3) {
         for (int j = 0; j < 4; ++j)
           ostriple->compute_add_const(x[j], m[j], X[i + j], MAC[i + j], r);
-        ostriple->compute_mul5(val, mac, val, mac, x[0], m[0], x[1], m[1], x[2],
+        ostriple->compute_mul_poly(val, mac, val, mac, x[0], m[0], x[1], m[1], x[2],
                                m[2], x[3], m[3]);
         i += 4;
       }
@@ -298,7 +298,7 @@ public:
       while (i < step - 3) {
         for (int j = 0; j < 4; ++j)
           ostriple->compute_add_const(x[j], m[j], dummy, MAC[i + j], r);
-        ostriple->compute_mul5(val, mac, val, mac, x[0], m[0], x[1], m[1], x[2],
+        ostriple->compute_mul_poly(val, mac, val, mac, x[0], m[0], x[1], m[1], x[2],
                                m[2], x[3], m[3]);
         i += 4;
       }

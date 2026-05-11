@@ -1,7 +1,7 @@
 #ifndef ZK_FP_EXECUTION_H__
 #define ZK_FP_EXECUTION_H__
 
-#include "emp-zk/emp-vole/emp-vole.h"
+#include "emp-zk/emp-svole/emp-svole.h"
 #include "emp-zk/emp-zk-arith/ostriple.h"
 #include "emp-zk/emp-zk-arith/edabit/edabits.h"
 

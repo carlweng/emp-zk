@@ -1,7 +1,7 @@
 #ifndef EMP_ZK_RAM_POLY_PRDT_H__
 #define EMP_ZK_RAM_POLY_PRDT_H__
 
-#include "emp-zk/emp-vole-f2k/svole.h"
+#include "emp-ot/emp-ot.h"
 
 template <typename IO> class RamPolyPrdt {
 public:

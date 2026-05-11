@@ -1,7 +1,7 @@
 #ifndef EMP_ZK_RAM_OSTRIPLE_H__
 #define EMP_ZK_RAM_OSTRIPLE_H__
 
-#include "emp-zk/emp-vole-f2k/svole.h"
+#include "emp-zk/emp-svole/emp-svole.h"
 #include "emp-zk/emp-zk-bool/ram-zk/poly_prdt.h"
 
 // =====================================================================
@@ -18,8 +18,7 @@ public:
   block delta;
 
   int authf2k_cnt = 0, check_cnt = 0;
-  std::vector<block> auth_buffer_val;
-  std::vector<block> auth_buffer_mac;
+  std::vector<AuthValue<F2kPolicy>> auth_buffer;
   std::vector<block> andgate_buffer_left_val;
   std::vector<block> andgate_buffer_left_mac;
   std::vector<block> andgate_buffer_rght_val;
@@ -30,14 +29,14 @@ public:
   IO *io;
   PRG prg;
   FerretCOT *ferret = nullptr;
-  SVoleF2k<IO> *svole = nullptr;
+  SVole<F2kPolicy, IO> *svole = nullptr;
   RamPolyPrdt<IO> *polyprdt = nullptr;
   // One chunk of scratch for ferret->rcot_*_next; allocated lazily in
   // andgate_correctness_check_manage. The bool backend opens the
   // long-lived ferret session, so rcot_*_next is callable here.
   std::vector<block> ope_buf;
 
-  int64_t BUFFER_MEM_SZ = -1, BUFFER_SZ = -1;
+  int64_t BUFFER_SZ = -1;
 
   RamOSTripleBase(int party, IO *io, FerretCOT *ferret)
       : party(party), io(io), ferret(ferret) {
@@ -45,17 +44,10 @@ public:
       this->delta = ferret->Delta;
     else
       this->delta = zero_block;
-    // SVoleF2k still takes IO** + threads + (implicit) pool. Pass a
-    // single-element array + threads=1; with threads=1 the SVoleF2k
-    // internal threading skeleton degenerates to a serial loop.
-    IO *ios_one[1] = { io };
-    svole = new SVoleF2k<IO>(party, /*threads=*/1, ios_one, ferret);
-    svole->setup(delta);
-    BUFFER_MEM_SZ = svole->param.n;
-    BUFFER_SZ = svole->param.buf_sz();
+    svole = new SVole<F2kPolicy, IO>(party, io, ferret, delta);
+    BUFFER_SZ = svole->ot_limit;
 
-    auth_buffer_val.resize(BUFFER_MEM_SZ);
-    auth_buffer_mac.resize(BUFFER_MEM_SZ);
+    auth_buffer.resize(BUFFER_SZ);
     andgate_buffer_left_val.resize(BUFFER_SZ);
     andgate_buffer_left_mac.resize(BUFFER_SZ);
     andgate_buffer_rght_val.resize(BUFFER_SZ);
@@ -79,8 +71,7 @@ public:
   void sync() { io->flush(); }
 
   void pre_f2k_buffer_refill() {
-    svole->extend_inplace(auth_buffer_val.data(),
-                          auth_buffer_mac.data(), BUFFER_MEM_SZ);
+    svole->extend(auth_buffer.data(), BUFFER_SZ);
     authf2k_cnt = 0;
   }
 
@@ -168,8 +159,7 @@ public:
   using Base::pack;
   using Base::polyprdt;
   using Base::ope_buf;
-  using Base::auth_buffer_val;
-  using Base::auth_buffer_mac;
+  using Base::auth_buffer;
   using Base::andgate_buffer_left_val;
   using Base::andgate_buffer_left_mac;
   using Base::andgate_buffer_rght_val;
@@ -209,10 +199,10 @@ public:
 
     block d;
     gfmul(vala, valb, &valc);
-    d = valc ^ auth_buffer_val[authf2k_cnt];
-    auth_buffer_val[authf2k_cnt] = valc;
+    d = valc ^ auth_buffer[authf2k_cnt].val;
+    auth_buffer[authf2k_cnt].val = valc;
     io->send_data(&d, sizeof(block));
-    macc = auth_buffer_mac[authf2k_cnt];
+    macc = auth_buffer[authf2k_cnt].mac;
     check_cnt++;
     authf2k_cnt++;
   }
@@ -259,7 +249,7 @@ private:
     block *lmac = andgate_buffer_left_mac.data();
     block *rval = andgate_buffer_rght_val.data();
     block *rmac = andgate_buffer_rght_mac.data();
-    block *omac = auth_buffer_mac.data() + authf2k_cnt - check_cnt;
+    const int omac_base = authf2k_cnt - check_cnt;
 
     for (uint32_t i = 0; i < task_n; ++i) {
       block A0, A1, tmp;
@@ -267,7 +257,7 @@ private:
       gfmul(lval[i], rmac[i], &tmp);
       gfmul(rval[i], lmac[i], &A1);
       A1 = A1 ^ tmp;
-      A1 = A1 ^ omac[i];
+      A1 = A1 ^ auth_buffer[omac_base + i].mac;
       lval[i] = A0;
       rval[i] = A1;
     }
@@ -293,8 +283,7 @@ public:
   using Base::pack;
   using Base::polyprdt;
   using Base::ope_buf;
-  using Base::auth_buffer_val;
-  using Base::auth_buffer_mac;
+  using Base::auth_buffer;
   using Base::andgate_buffer_left_val;
   using Base::andgate_buffer_left_mac;
   using Base::andgate_buffer_rght_val;
@@ -339,9 +328,9 @@ public:
     block d;
     io->recv_data(&d, sizeof(block));
     gfmul(d, delta, &d);
-    auth_buffer_mac[authf2k_cnt] ^= d;
+    auth_buffer[authf2k_cnt].mac ^= d;
     valc = zero_block;
-    macc = auth_buffer_mac[authf2k_cnt];
+    macc = auth_buffer[authf2k_cnt].mac;
     check_cnt++;
     authf2k_cnt++;
   }
@@ -378,13 +367,13 @@ private:
     if (task_n == 0) return;
     block *lmac = andgate_buffer_left_mac.data();
     block *rmac = andgate_buffer_rght_mac.data();
-    block *omac = auth_buffer_mac.data() + authf2k_cnt - check_cnt;
+    const int omac_base = authf2k_cnt - check_cnt;
     block *lval = andgate_buffer_left_val.data();   // reused as scratch
 
     for (uint32_t i = 0; i < task_n; ++i) {
       block B, tmp;
       gfmul(lmac[i], rmac[i], &B);
-      gfmul(omac[i], delta, &tmp);
+      gfmul(auth_buffer[omac_base + i].mac, delta, &tmp);
       B = B ^ tmp;
       lval[i] = B;
     }

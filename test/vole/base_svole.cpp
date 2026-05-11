@@ -1,4 +1,4 @@
-#include "emp-zk/emp-vole/base_svole.h"
+#include "emp-zk/emp-svole/fp_base_svole.h"
 #include "emp-tool/emp-tool.h"
 
 using namespace emp;

@@ -1,5 +1,5 @@
 #include "emp-tool/emp-tool.h"
-#include "emp-zk/emp-vole/emp-vole.h"
+#include "emp-zk/emp-svole/emp-svole.h"
 
 using namespace emp;
 using namespace std;
@@ -51,14 +51,13 @@ void test_lpn(NetIO *io, int party) {
     svole->triple_gen_recv(mac2, test_k);
   }
 
-  ThreadPool pool(1);
-  LpnFp<10> lpn(test_n, test_k, &pool, pool.size());
+  LpnFp<10> lpn(test_n, test_k);
   auto start = clock_start();
   if (party == ALICE) {
-    lpn.compute_send(mac1, mac2);
+    lpn.compute_send((AuthValue<FpPolicy> *)mac1, (AuthValue<FpPolicy> *)mac2);
     check_triple(io, &Delta, mac1, test_n);
   } else {
-    lpn.compute_recv(mac1, mac2);
+    lpn.compute_recv((AuthValue<FpPolicy> *)mac1, (AuthValue<FpPolicy> *)mac2);
     check_triple(io, nullptr, mac1, test_n);
   }
   std::cout << "LPN: " << time_from(start) * 1000.0 / test_n << " ns per entry"

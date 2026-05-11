@@ -45,45 +45,49 @@ void check_triple(const block delta,
 
 
 void test_vole_triple(
-  NetIO **ios, 
+  NetIO **ios,
   BoolIO **ios_bool,
   int party) {
-  // FerretCOT post-unification takes a single IOChannel*; threading for
-  // the rest of the protocol still happens through ios_bool[1..].
   FerretCOT ferretcot(
     3 - party, reinterpret_cast<IOChannel *>(ios_bool[0]), /*malicious=*/true, /*run_setup=*/true);
 
-  // SVoleF2k / BaseSVoleF2k pull from the streaming ferret session
-  // via rcot_*_next; open it explicitly here (in the bool backend
-  // this is implicit ctor->dtor). ferret was built with party=3-party,
-  // so ferret is the OT-sender when this test side is BOB.
+  // SVole<F2kPolicy>::Bootstrap pulls from the streaming ferret session
+  // via rcot_*_next; open it explicitly here (in the bool backend this
+  // is implicit ctor->dtor). ferret was built with party=3-party, so
+  // ferret is the OT-sender when this test side is BOB.
   const bool sender = (party == BOB);
   if (sender) ferretcot.rcot_send_begin();
   else        ferretcot.rcot_recv_begin();
 
-  // instantiate F2K VOLE
-  SVoleF2k<BoolIO> vtriple(
-    party, threads, ios_bool, &ferretcot);
-
-  PRG prg;
   block Delta = ferretcot.Delta;
   auto start = clock_start();
-  vtriple.setup(Delta);
+  SVole<F2kPolicy, BoolIO> vtriple(party, ios_bool[0], &ferretcot,
+                                   party == BOB ? Delta : zero_block);
   std::cout << "setup " << time_from(start) / 1000 << " ms" << std::endl;
-  check_triple(Delta, vtriple.pre_x.data(), vtriple.pre_yz.data(), vtriple.param.n_pre, ios[0]);
+
+  // Post-setup sanity check on the carry-over pre_auth.
+  {
+    std::vector<block> px(vtriple.param.n_pre), py(vtriple.param.n_pre);
+    for (int64_t i = 0; i < vtriple.param.n_pre; ++i) {
+      px[i] = vtriple.pre_auth[i].val;
+      py[i] = vtriple.pre_auth[i].mac;
+    }
+    check_triple(Delta, px.data(), py.data(), vtriple.param.n_pre, ios[0]);
+  }
 
   std::size_t triple_need = vtriple.ot_limit;
-  std::size_t buf_sz = vtriple.param.n;
-  block *buf_x = new block[buf_sz];
-  block *buf_yz = new block[buf_sz];
+  std::vector<AuthValue<F2kPolicy>> buf(triple_need);
+  std::vector<block> buf_x(triple_need), buf_yz(triple_need);
   for(int i = 0; i < 16; ++i) {
     start = clock_start();
-    vtriple.extend_inplace(buf_x, buf_yz, buf_sz);
+    vtriple.extend(buf.data(), triple_need);
     std::cout << "extend " << time_from(start) / 1000 << " ms" << std::endl;
-    check_triple(Delta, buf_x, buf_yz, triple_need, ios[0]);
+    for (std::size_t k = 0; k < triple_need; ++k) {
+      buf_x[k] = buf[k].val;
+      buf_yz[k] = buf[k].mac;
+    }
+    check_triple(Delta, buf_x.data(), buf_yz.data(), triple_need, ios[0]);
   }
-  delete[] buf_x;
-  delete[] buf_yz;
 
   if (sender) ferretcot.rcot_send_end();
   else        ferretcot.rcot_recv_end();

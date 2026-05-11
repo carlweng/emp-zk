@@ -16,53 +16,25 @@ int party, port;
 const int threads = 4;
 
 void test_vole_triple(NetIO *ios[threads + 1], int party) {
-  VoleTriple<NetIO> vtriple(party, threads, ios);
-
-  __uint128_t Delta = (__uint128_t)0;
+  __uint128_t Delta = 0;
   if (party == ALICE) {
     PRG prg;
     prg.random_data(&Delta, sizeof(__uint128_t));
     Delta = Delta & ((__uint128_t)0xFFFFFFFFFFFFFFFFLL);
     Delta = mod(Delta, pr);
-    auto start = clock_start();
-    vtriple.setup(Delta);
-    std::cout << "setup " << time_from(start) / 1000 << " ms" << std::endl;
-    vtriple.check_triple(Delta, vtriple.pre_yz.data(), vtriple.param.n_pre);
-  } else {
-    auto start = clock_start();
-    vtriple.setup();
-    std::cout << "setup " << time_from(start) / 1000 << " ms" << std::endl;
-    vtriple.check_triple(0, vtriple.pre_yz.data(), vtriple.param.n_pre);
   }
+  auto start = clock_start();
+  SVole<FpPolicy, NetIO> vtriple(party, ios[0], nullptr, (uint64_t)Delta);
+  std::cout << "setup " << time_from(start) / 1000 << " ms" << std::endl;
 
   int triple_need = vtriple.ot_limit;
-  auto start = clock_start();
-  __uint128_t *buf = new __uint128_t[triple_need];
-  if (party == ALICE) {
-    vtriple.extend(buf, triple_need);
-    std::cout << triple_need << "\t" << time_from(start) / 1000 << " ms"
-              << std::endl;
-    vtriple.check_triple(Delta, buf, triple_need);
-  } else {
-    vtriple.extend(buf, triple_need);
-    std::cout << triple_need << "\t" << time_from(start) / 1000 << " ms"
-              << std::endl;
-    vtriple.check_triple(0, buf, triple_need);
-  }
-  delete[] buf;
-
-  // triple generation inplace
-  uint64_t triple_need_inplace = vtriple.ot_limit;
-  uint64_t memory_need = vtriple.byte_memory_need_inplace(triple_need_inplace);
-  buf = new __uint128_t[memory_need];
   start = clock_start();
-  vtriple.extend_inplace(buf, memory_need);
-  std::cout << triple_need_inplace << "\tinplace\t" << memory_need << "\t"
-            << time_from(start) / 1000 << " ms" << std::endl;
-  if (party == ALICE)
-    vtriple.check_triple(Delta, buf, memory_need);
-  else
-    vtriple.check_triple(0, buf, memory_need);
+  __uint128_t *buf = new __uint128_t[triple_need];
+  vtriple.extend((AuthValue<FpPolicy> *)buf, triple_need);
+  std::cout << triple_need << "\t" << time_from(start) / 1000 << " ms"
+            << std::endl;
+  vtriple.check_triple(party == ALICE ? Delta : 0, buf, triple_need);
+  delete[] buf;
 
 #if defined(__linux__)
   struct rusage rusage;

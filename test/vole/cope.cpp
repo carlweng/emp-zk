@@ -1,4 +1,4 @@
-#include "emp-zk/emp-vole/cope.h"
+#include "emp-zk/emp-svole/fp_cope.h"
 #include "emp-tool/emp-tool.h"
 
 using namespace emp;

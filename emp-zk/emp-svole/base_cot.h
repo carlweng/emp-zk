@@ -16,7 +16,7 @@
 
 #include "emp-ot/emp-ot.h"
 #include "emp-tool/emp-tool.h"
-#include "emp-zk/emp-vole/preot.h"
+#include "emp-zk/emp-svole/preot.h"
 
 namespace emp {
 

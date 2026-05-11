@@ -3,7 +3,9 @@
 
 #include "emp-ot/emp-ot.h"
 #include "emp-tool/emp-tool.h"
-#include "emp-zk/emp-vole/utility.h"
+#include "emp-zk/emp-svole/fp_utility.h"
+
+namespace emp {
 
 template <typename IO> class Cope {
 public:
@@ -196,4 +198,5 @@ public:
   }
 };
 
+} // namespace emp
 #endif

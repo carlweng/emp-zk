@@ -1,8 +1,8 @@
 #ifndef FP_UTILITY_H__
 #define FP_UTILITY_H__
 #include <emp-tool/emp-tool.h>
-using namespace emp;
-using namespace std;
+
+namespace emp {
 
 #define MERSENNE_PRIME_EXP 61
 #define FIELD_TYPE uint64_t
@@ -222,4 +222,10 @@ bool feq_recv(NetIO *io, void* in, int nbytes) {
         else return true;
 }
 */
+
+} // namespace emp
+
+using namespace emp;
+using namespace std;
+
 #endif

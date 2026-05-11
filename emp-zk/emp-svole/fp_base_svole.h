@@ -2,7 +2,9 @@
 #define BASE_VOLE_H__
 
 #include "emp-tool/emp-tool.h"
-#include "emp-zk/emp-vole/cope.h"
+#include "emp-zk/emp-svole/fp_cope.h"
+
+namespace emp {
 
 template <typename IO> class Base_svole {
 public:
@@ -93,4 +95,5 @@ public:
   }
 };
 
+} // namespace emp
 #endif

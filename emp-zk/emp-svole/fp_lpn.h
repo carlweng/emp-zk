@@ -1,15 +1,24 @@
-#ifndef _LPN_FP_H__
-#define _LPN_FP_H__
+#ifndef EMP_SVOLE_FP_LPN_H__
+#define EMP_SVOLE_FP_LPN_H__
 
 #include "emp-tool/emp-tool.h"
-#include "emp-zk/emp-vole/utility.h"
+#include "emp-zk/emp-svole/fp_utility.h"
+
+// F_p LPN linear-code amplifier. Same shape as char-2 LpnAmplifier
+// (PRP-seeded random d-subset indices per output, XOR-fold over the
+// preV/preM pre-images), but the fold uses mod-p addition with SIMD
+// SSE pairs to keep throughput comparable. d hard-coded to 10 with
+// the 5+5 split that controls partial-mod frequency.
+//
+// Single-threaded (the call site in VoleTriple → SVole<FpPolicy> is
+// single-threaded; the old ThreadPool dispatch is gone).
+
 namespace emp {
+
 template <int d = 10> class LpnFp {
 public:
   int party;
   int k, n;
-  ThreadPool *pool;
-  int threads;
   block seed;
 
   __uint128_t *M;
@@ -18,13 +27,9 @@ public:
   const __uint128_t *preK;
 
   uint32_t k_mask;
-  LpnFp(int n, int k, ThreadPool *pool, int threads, block seed = zero_block) {
-    this->k = k;
-    this->n = n;
-    this->pool = pool;
-    this->threads = threads;
-    this->seed = seed;
 
+  LpnFp(int n, int k, block seed = zero_block)
+      : k(k), n(n), seed(seed) {
     k_mask = 1;
     while (k_mask < (uint32_t)k) {
       k_mask <<= 1;
@@ -136,18 +141,18 @@ public:
     add_func(i, index);
   }
 
-  void task(int start, int end) {
+  void compute() {
     PRP prp(seed);
-    int j = start;
-    if (party == 1) {
+    int j = 0;
+    if (party == ALICE) {
       std::function<void(int, int *)> add_func1 = std::bind(
           &LpnFp::add1, this, std::placeholders::_1, std::placeholders::_2);
       std::function<void(int, int *)> add_func1s =
           std::bind(&LpnFp::add1_single, this, std::placeholders::_1,
                     std::placeholders::_2);
-      for (; j < end - 4; j += 4)
+      for (; j < n - 4; j += 4)
         __compute4(j, &prp, add_func1);
-      for (; j < end; ++j)
+      for (; j < n; ++j)
         __compute1(j, &prp, add_func1s);
     } else {
       std::function<void(int, int *)> add_func2 = std::bind(
@@ -155,42 +160,32 @@ public:
       std::function<void(int, int *)> add_func2s =
           std::bind(&LpnFp::add2_single, this, std::placeholders::_1,
                     std::placeholders::_2);
-      for (; j < end - 4; j += 4)
+      for (; j < n - 4; j += 4)
         __compute4(j, &prp, add_func2);
-      for (; j < end; ++j)
+      for (; j < n; ++j)
         __compute1(j, &prp, add_func2s);
     }
   }
 
-  void compute() {
-    vector<std::future<void>> fut;
-    int width = n / (threads + 1);
-    for (int i = 0; i < threads; ++i) {
-      int start = i * width;
-      int end = min((i + 1) * width, n);
-      fut.push_back(pool->enqueue([this, start, end]() { task(start, end); }));
-    }
-    int start = threads * width;
-    int end = min((threads + 1) * width, n);
-    task(start, end);
-
-    for (auto &f : fut)
-      f.get();
-  }
-
-  void compute_send(__uint128_t *K, const __uint128_t *kkK) {
+  // AuthValue<FpPolicy>* aliases __uint128_t* (mac-first layout): the
+  // public signatures take the typed form, internals reinterpret for
+  // the SIMD pair adds.
+  void compute_send(AuthValue<FpPolicy> *K_auth,
+                    const AuthValue<FpPolicy> *kkK_auth) {
     this->party = ALICE;
-    this->K = K;
-    this->preK = kkK;
+    this->K = (__uint128_t *)K_auth;
+    this->preK = (const __uint128_t *)kkK_auth;
     compute();
   }
 
-  void compute_recv(__uint128_t *M, const __uint128_t *kkM) {
+  void compute_recv(AuthValue<FpPolicy> *M_auth,
+                    const AuthValue<FpPolicy> *kkM_auth) {
     this->party = BOB;
-    this->M = M;
-    this->preM = kkM;
+    this->M = (__uint128_t *)M_auth;
+    this->preM = (const __uint128_t *)kkM_auth;
     compute();
   }
 };
+
 } // namespace emp
 #endif

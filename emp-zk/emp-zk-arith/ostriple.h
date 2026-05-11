@@ -1,7 +1,7 @@
 #ifndef FP_OS_TRIPLE_H__
 #define FP_OS_TRIPLE_H__
 
-#include "emp-zk/emp-vole/emp-vole.h"
+#include "emp-zk/emp-svole/emp-svole.h"
 #include "emp-zk/emp-zk-arith/triple_auth.h"
 
 #define LOW64(x) _mm_extract_epi64((block)x, 0)
@@ -22,7 +22,7 @@ public:
   IO *io;
   IO **ios;
   PRG prg;
-  VoleTriple<IO> *vole = nullptr;
+  SVole<FpPolicy, IO> *vole = nullptr;
   FpAuthHelper<IO> *auth_helper = nullptr;
   ThreadPool *pool = nullptr;
 
@@ -34,19 +34,16 @@ public:
     io = ios[0];
     this->ios = ios;
     pool = new ThreadPool(threads);
-    vole = new VoleTriple<IO>(3 - party, threads, ios);
+
+    if (party == BOB) delta_gen();
+    vole = new SVole<FpPolicy, IO>(3 - party, ios[0], nullptr,
+                                    party == BOB ? (uint64_t)delta : 0);
 
     andgate_out_buffer.resize(CHECK_SZ);
     andgate_left_buffer.resize(CHECK_SZ);
     andgate_right_buffer.resize(CHECK_SZ);
-    if (party == ALICE) {
-      vole->setup();
-    } else {
-      delta_gen();
-      vole->setup(delta);
-    }
     __uint128_t tmp;
-    vole->extend(&tmp, 1);
+    vole->extend((AuthValue<FpPolicy> *)&tmp, 1);
 
     auth_helper = new FpAuthHelper<IO>(party, io);
   }
@@ -65,7 +62,7 @@ public:
    */
   __uint128_t authenticated_val_input(uint64_t w) {
     __uint128_t mac;
-    vole->extend(&mac, 1);
+    vole->extend((AuthValue<FpPolicy> *)&mac, 1);
 
     uint64_t lam = PR - w;
     lam = add_mod(HIGH64(mac), lam);
@@ -75,7 +72,7 @@ public:
 
   void authenticated_val_input(__uint128_t *label, const uint64_t *w, int len) {
     std::vector<uint64_t> lam(len);
-    vole->extend(label, len);
+    vole->extend((AuthValue<FpPolicy> *)label, len);
 
     for (int i = 0; i < len; ++i) {
       lam[i] = PR - w[i];
@@ -87,7 +84,7 @@ public:
 
   __uint128_t authenticated_val_input() {
     __uint128_t key;
-    vole->extend(&key, 1);
+    vole->extend((AuthValue<FpPolicy> *)&key, 1);
 
     uint64_t lam;
     io->recv_data(&lam, sizeof(uint64_t));
@@ -100,7 +97,7 @@ public:
 
   void authenticated_val_input(__uint128_t *label, int len) {
     std::vector<uint64_t> lam(len);
-    vole->extend(label, len);
+    vole->extend((AuthValue<FpPolicy> *)label, len);
 
     io->recv_data(lam.data(), len * sizeof(uint64_t));
 
@@ -119,7 +116,7 @@ public:
       andgate_correctness_check_manage();
       check_cnt = 0;
     }
-    vole->extend(&mac, 1);
+    vole->extend((AuthValue<FpPolicy> *)&mac, 1);
     andgate_left_buffer[check_cnt] = Ma;
     andgate_right_buffer[check_cnt] = Mb;
 
@@ -141,7 +138,7 @@ public:
       andgate_correctness_check_manage();
       check_cnt = 0;
     }
-    vole->extend(&key, 1);
+    vole->extend((AuthValue<FpPolicy> *)&key, 1);
     andgate_left_buffer[check_cnt] = Ka;
     andgate_right_buffer[check_cnt] = Kb;
 
@@ -213,7 +210,7 @@ public:
 
     if (party == ALICE) {
       __uint128_t ope_data;
-      vole->extend(&ope_data, 1);
+      vole->extend((AuthValue<FpPolicy> *)&ope_data, 1);
       uint64_t A0_star = LOW64(ope_data);
       uint64_t A1_star = HIGH64(ope_data);
       uint64_t check_sum[2];
@@ -222,7 +219,7 @@ public:
       io->send_data(check_sum, 2 * sizeof(uint64_t));
     } else {
       __uint128_t ope_data;
-      vole->extend(&ope_data, 1);
+      vole->extend((AuthValue<FpPolicy> *)&ope_data, 1);
       uint64_t B_star = LOW64(ope_data);
       W = add_mod(W, B_star);
       uint64_t check_sum[2];
@@ -345,13 +342,13 @@ public:
 
   // sender
   void refill_send(__uint128_t *yz, int *cnt, int sz) {
-    vole->extend(yz, sz);
+    vole->extend((AuthValue<FpPolicy> *)yz, sz);
     *cnt = 0;
   }
 
   // recver
   void refill_recv(__uint128_t *yz, int *cnt, int sz) {
-    vole->extend(yz, sz);
+    vole->extend((AuthValue<FpPolicy> *)yz, sz);
     *cnt = 0;
   }
 

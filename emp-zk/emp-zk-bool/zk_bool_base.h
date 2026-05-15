@@ -110,9 +110,9 @@ public:
     // offset 0, so the cast is a no-op at runtime. FerretCOT now takes a
     // single IOChannel (post-unification with the other OT extensions).
     IOChannel *iochan = reinterpret_cast<IOChannel *>(io_);
-    ferret = new FerretCOT(3 - p, iochan, /*malicious=*/true, /*run_setup=*/true);
+    ferret = new FerretCOT(3 - p, iochan, /*malicious=*/true);
     ferret_is_sender = (p == BOB);   // ferret_party = 3-p; sender ⇔ ferret_party == ALICE
-    delta = ferret->Delta;
+    delta = ferret->Delta;           // Δ sampled in FerretCOT's ctor; bootstrap fires lazily on first rcot_*_begin
 
     andgate_out_buffer.resize(CHECK_SZ);
     andgate_left_buffer.resize(CHECK_SZ);

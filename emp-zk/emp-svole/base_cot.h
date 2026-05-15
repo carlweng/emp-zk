@@ -11,6 +11,10 @@
 //
 // Differences from the v0.3.x original:
 //   - IKNP is no longer templated on IO; ctor takes `IOChannel*`.
+//   - IKNP allocates state and samples Δ in its ctor; the base-OT
+//     bootstrap fires lazily on first rcot_*_begin. There is no
+//     public setup() — callers that want to override the ctor's
+//     random Δ call set_delta(const bool*) before the first rcot_*.
 //   - block_to_bool helper is gone from emp-tool; replaced by an
 //     inline LSB-first bit extraction.
 
@@ -33,7 +37,7 @@ public:
     this->party = party;
     this->io = io;
     this->malicious = malicious;
-    iknp = new IKNP(static_cast<IOChannel *>(io), malicious);
+    iknp = new IKNP(party, static_cast<IOChannel *>(io), malicious);
     minusone = makeBlock(0xFFFFFFFFFFFFFFFFLL, 0xFFFFFFFFFFFFFFFELL);
     one = makeBlock(0x0LL, 0x1LL);
   }
@@ -51,23 +55,18 @@ public:
       this->ot_delta = deltain;
       bool delta_bool[128];
       block_to_bool_lsb(delta_bool, ot_delta);
-      iknp->setup_send(delta_bool);
-    } else {
-      iknp->setup_recv();
+      iknp->set_delta(delta_bool);
     }
+    // Receiver: no Δ to set; the bootstrap fires on first rcot_*_begin.
   }
 
   void cot_gen_pre() {
     if (this->party == ALICE) {
-      PRG prg;
-      prg.random_block(&ot_delta, 1);
-      ot_delta = ot_delta & minusone;
-      ot_delta = ot_delta ^ one;
-      bool delta_bool[128];
-      block_to_bool_lsb(delta_bool, ot_delta);
-      iknp->setup_send(delta_bool);
-    } else {
-      iknp->setup_recv();
+      // IKNP's ctor already sampled a random Δ with LSB=1 pinned —
+      // reuse it instead of resampling. Mirror it into our own field
+      // so cot_gen / check_cot can read the value without going
+      // through iknp.
+      this->ot_delta = iknp->Delta;
     }
   }
 

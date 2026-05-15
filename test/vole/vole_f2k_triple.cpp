@@ -49,7 +49,8 @@ void test_vole_triple(
   BoolIO **ios_bool,
   int party) {
   FerretCOT ferretcot(
-    3 - party, reinterpret_cast<IOChannel *>(ios_bool[0]), /*malicious=*/true, /*run_setup=*/true);
+    3 - party, reinterpret_cast<IOChannel *>(ios_bool[0]), /*malicious=*/true);
+  // FerretCOT ctor samples Δ; bootstrap fires lazily on first rcot_*_begin.
 
   // SVole<F2kPolicy>::Bootstrap pulls from the streaming ferret session
   // via rcot_*_next; open it explicitly here (in the bool backend this

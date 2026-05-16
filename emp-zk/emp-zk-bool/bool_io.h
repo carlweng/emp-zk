@@ -19,11 +19,11 @@ public:
   bool sender;
   vector<unsigned char> tmp_arr;
   BoolIO(IOChannel *io, int sender) : io(io), sender(sender) {
-    buf.reset(new bool[NETWORK_BUFFER_SIZE2]);
+    buf.reset(new bool[NETWORK_STAGING_BUFFER_SIZE]);
     if (sender)
       ptr = 0;
     else
-      ptr = NETWORK_BUFFER_SIZE2;
+      ptr = NETWORK_STAGING_BUFFER_SIZE;
   }
   ~BoolIO() { this->flush(); }
   void flush() override {
@@ -34,7 +34,7 @@ public:
           send_bit(data);
       }
     } else {
-      ptr = NETWORK_BUFFER_SIZE2;
+      ptr = NETWORK_STAGING_BUFFER_SIZE;
     }
     io->flush();
   }
@@ -48,15 +48,15 @@ public:
   void send_bit(bool data) {
     buf[ptr] = data;
     ptr++;
-    if (ptr == NETWORK_BUFFER_SIZE2) {
-      send_bool_raw(buf.get(), NETWORK_BUFFER_SIZE2);
+    if (ptr == NETWORK_STAGING_BUFFER_SIZE) {
+      send_bool_raw(buf.get(), NETWORK_STAGING_BUFFER_SIZE);
       ptr = 0;
     }
   }
 
   bool recv_bit() {
-    if (ptr == NETWORK_BUFFER_SIZE2) {
-      recv_bool_raw(buf.get(), NETWORK_BUFFER_SIZE2);
+    if (ptr == NETWORK_STAGING_BUFFER_SIZE) {
+      recv_bool_raw(buf.get(), NETWORK_STAGING_BUFFER_SIZE);
       ptr = 0;
     }
     bool res = buf[ptr];
@@ -71,7 +71,7 @@ public:
   }
 
   void recv_data_internal(void *data, size_t nbyte) override {
-    if (ptr != NETWORK_BUFFER_SIZE2)
+    if (ptr != NETWORK_STAGING_BUFFER_SIZE)
       flush();
     io->recv_data(data, nbyte);
   }

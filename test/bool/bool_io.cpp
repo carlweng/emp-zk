@@ -12,7 +12,19 @@ int main(int argc, char **argv) {
   bool *data = new bool[LL];
   bool *data2 = new bool[LL];
 
-  PRG prg(fix_key);
+  // Agree on a fresh PRG seed so BOB can re-derive the expected bit
+  // stream. Done over netio before the timed bit-streaming loop so
+  // the round-trip stays out of the throughput measurement.
+  block test_seed;
+  if (party == ALICE) {
+    PRG().random_block(&test_seed, 1);
+    netio->send_data(&test_seed, sizeof(block));
+  } else {
+    netio->recv_data(&test_seed, sizeof(block));
+  }
+  netio->flush();
+
+  PRG prg(&test_seed);
   prg.random_bool(data, LL);
   auto t1 = clock_start();
   if (party == ALICE) {
@@ -25,7 +37,7 @@ int main(int argc, char **argv) {
   io->flush();
   cout << time_from(t1) / LL * 1000 << "\n";
   if (party == BOB) {
-    PRG prg2(fix_key);
+    PRG prg2(&test_seed);
     prg2.random_bool(data2, LL);
     if (memcmp(data, data2, LL) != 0)
       cout << "wrong!\n";

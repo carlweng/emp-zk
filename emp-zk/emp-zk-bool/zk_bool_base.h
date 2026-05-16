@@ -88,7 +88,7 @@ public:
         // Eager flush: push any OT-extension bytes still in NetIO's
         // send_buf out to the wire so the receiver doesn't stall
         // waiting for a future refill or run_end. No-op on the recv
-        // side (BoolIO::flush() with ptr==NETWORK_BUFFER_SIZE2 + no
+        // side (BoolIO::flush() with ptr==NETWORK_STAGING_BUFFER_SIZE + no
         // pending sends).
         io->flush();
         rcot_pos = 0;
@@ -128,10 +128,14 @@ public:
     block tmp;
     take_rcot(&tmp, 1);
 
-    // Public-input label table. Both bits start LSB-cleared; subclass
-    // ctor flips bit-1 of pub_label[1] (prover) or xors zdelta (verifier).
-    PRG label_prg(fix_key);
-    label_prg.random_block(pub_label, 2);
+    // Public-input label table — known to both parties by design.
+    // PRP(1) key, distinct from ZKFpExec's PRP(0), so the two public
+    // outputs live in disjoint pseudorandom domains. Both bits start
+    // LSB-cleared; subclass ctor flips bit-1 of pub_label[1] (prover)
+    // or xors zdelta (verifier).
+    pub_label[0] = makeBlock(0, 0);
+    pub_label[1] = makeBlock(0, 1);
+    PRP(makeBlock(0, 1)).permute_block(pub_label, 2);
     pub_label[0] = clear_lsb(pub_label[0]);
     pub_label[1] = clear_lsb(pub_label[1]);
 

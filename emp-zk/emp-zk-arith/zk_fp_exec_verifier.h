@@ -31,7 +31,7 @@ public:
     label = this->ostriple->authenticated_val_input();
   }
 
-  void feed(__uint128_t *label, const uint64_t *val, int len) {
+  void feed(__uint128_t *label, const uint64_t *val, int64_t len) {
     this->ostriple->authenticated_val_input(label, len);
   }
 
@@ -39,15 +39,15 @@ public:
    * check correctness of triples using cut and choose and bucketing
    * check correctness of the output
    */
-  void reveal(__uint128_t *key, uint64_t *value, int len) {
+  void reveal(__uint128_t *key, uint64_t *value, int64_t len) {
     this->ostriple->reveal_recv(key, value, len);
   }
 
-  void reveal_check(__uint128_t *key, const uint64_t *value, int len) {
+  void reveal_check(__uint128_t *key, const uint64_t *value, int64_t len) {
     this->ostriple->reveal_check_recv(key, value, len);
   }
 
-  void reveal_check_zero(__uint128_t *key, int len) {
+  void reveal_check_zero(__uint128_t *key, int64_t len) {
     this->ostriple->reveal_check_zero(key, len);
   }
 

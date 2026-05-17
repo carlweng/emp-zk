@@ -44,17 +44,17 @@ public:
   void feed(void *out, int from_party, const bool *in, size_t n) override {
     block *label = static_cast<block *>(out);
     if (from_party == ALICE)
-      authenticated_bits_input(label, in, static_cast<int>(n));
+      authenticated_bits_input(label, in, static_cast<int64_t>(n));
     else if (from_party == PUBLIC)
       for (size_t i = 0; i < n; ++i) label[i] = pub_label[in[i]];
   }
 
   void reveal(bool *out, int to_party, const void *in, size_t n) override {
     const block *label = static_cast<const block *>(in);
-    int len = static_cast<int>(n);
+    int64_t len = static_cast<int64_t>(n);
     if (to_party == ALICE) {
       // Local read-out — no MAC check needed since prover is the trust root.
-      for (int i = 0; i < len; ++i) out[i] = getLSB(label[i]);
+      for (int64_t i = 0; i < len; ++i) out[i] = getLSB(label[i]);
     } else { // BOB or PUBLIC
       verify_output(out, label, len);
     }
@@ -63,9 +63,9 @@ public:
 private:
   // Authenticated-bit input: receive a fresh COT pair, embed the cleartext
   // bit in the LSB, send the masking flip to BOB.
-  void authenticated_bits_input(block *auth, const bool *in, int len) {
+  void authenticated_bits_input(block *auth, const bool *in, int64_t len) {
     take_rcot(auth, len);
-    for (int i = 0; i < len; ++i) {
+    for (int64_t i = 0; i < len; ++i) {
       bool buff = getLSB(auth[i]) ^ in[i];
       auth[i] = with_lsb(auth[i], in[i]);
       io->send_bit(buff);
@@ -99,22 +99,22 @@ private:
   // Output reveal: send each cleartext bit, then drop the MACs into the
   // auth_hash transcript. The destructor sends the digest; the verifier's
   // matching digest fails error() if the prover lied.
-  void verify_output(bool *b, const block *output, int length) {
-    for (int i = 0; i < length; ++i) {
+  void verify_output(bool *b, const block *output, int64_t length) {
+    for (int64_t i = 0; i < length; ++i) {
       b[i] = getLSB(output[i]);
       io->send_bit(b[i]);
     }
     auth_hash.put_block(output, length);
   }
 
-  void andgate_correctness_check(block *ret, uint32_t task_n,
+  void andgate_correctness_check(block *ret, int64_t task_n,
                                  block chi_seed) override {
     if (task_n == 0) return;
     block *left    = andgate_left_buffer.data();
     block *right   = andgate_right_buffer.data();
     block *gateout = andgate_out_buffer.data();
 
-    for (uint32_t i = 0; i < task_n; ++i) {
+    for (int64_t i = 0; i < task_n; ++i) {
       block A0, A1;
       gfmul(left[i], right[i], &A0);
       A1 = (getLSB(left[i])  ? right[i] : zero_block) ^

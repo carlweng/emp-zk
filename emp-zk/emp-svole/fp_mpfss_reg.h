@@ -22,9 +22,9 @@ namespace emp {
 template <typename IO> class MpfssRegFp {
 public:
   int party;
-  int item_n, idx_max, m;
-  int tree_height, leave_n;
-  int tree_n;
+  int64_t item_n, idx_max, m;
+  int64_t tree_height, leave_n;
+  int64_t tree_n;
   bool is_malicious;
 
   PRG prg;
@@ -35,7 +35,7 @@ public:
   __uint128_t *triple_yz;
   std::vector<uint32_t> item_pos_recver;
 
-  MpfssRegFp(int party, int n, int t, int log_bin_sz, IO *io) {
+  MpfssRegFp(int party, int64_t n, int64_t t, int64_t log_bin_sz, IO *io) {
     this->party = party;
     this->netio = io;
     this->is_malicious = false;
@@ -64,8 +64,8 @@ public:
   void recver_init() { item_pos_recver.resize(this->item_n); }
 
   void set_vec_x(__uint128_t *out, __uint128_t *in) {
-    for (int i = 0; i < tree_n; ++i) {
-      int64_t pt = (int64_t)i * leave_n + ((int64_t)item_pos_recver[i] % leave_n);
+    for (int64_t i = 0; i < tree_n; ++i) {
+      int64_t pt = i * leave_n + ((int64_t)item_pos_recver[i] % leave_n);
       out[pt] = out[pt] ^ (__uint128_t)makeBlock(in[i], 0x0LL);
     }
   }
@@ -87,7 +87,7 @@ public:
   void mpfss(OTPre<IO> *ot, __uint128_t *sparse_vector) {
     std::vector<FpSpfssSender<IO> *> senders;
     std::vector<FpSpfssRecver<IO> *> recvers;
-    for (int i = 0; i < tree_n; ++i) {
+    for (int64_t i = 0; i < tree_n; ++i) {
       if (party == ALICE) {
         senders.push_back(new FpSpfssSender<IO>(netio, tree_height));
         ot->choices_sender();
@@ -100,7 +100,7 @@ public:
     netio->flush();
     ot->reset();
 
-    for (int i = 0; i < tree_n; ++i) {
+    for (int64_t i = 0; i < tree_n; ++i) {
       if (party == ALICE) {
         ggm_tree[i] = sparse_vector + i * leave_n;
         senders[i]->compute(ggm_tree[i], secret_share_x, triple_yz[i]);
@@ -125,7 +125,7 @@ public:
         netio->send_data(&check_seed, sizeof(block));
         netio->flush();
       }
-      for (int i = 0; i < tree_n; ++i) {
+      for (int64_t i = 0; i < tree_n; ++i) {
         if (party == ALICE)
           senders[i]->consistency_check_msg_gen(check_VW_buf[i], netio,
                                                 check_seed);
@@ -148,14 +148,14 @@ public:
     for (auto p : recvers) delete p;
   }
 
-  void consistency_batch_check(__uint128_t y, int num) {
+  void consistency_batch_check(__uint128_t y, int64_t num) {
     uint64_t x_star;
     netio->recv_data(&x_star, sizeof(uint64_t));
     uint64_t tmp = mult_mod(secret_share_x, x_star);
     tmp = add_mod((uint64_t)y, tmp);
     uint64_t vb = pr - tmp; // y_star
 
-    for (int i = 0; i < num; ++i)
+    for (int64_t i = 0; i < num; ++i)
       vb = add_mod(vb, (uint64_t)check_VW_buf[i]);
     Hash hash;
     block h = hash.hash_for_block(&vb, sizeof(uint64_t));
@@ -163,9 +163,9 @@ public:
     netio->flush();
   }
 
-  void consistency_batch_check(__uint128_t *delta2, __uint128_t z, int num) {
+  void consistency_batch_check(__uint128_t *delta2, __uint128_t z, int64_t num) {
     uint64_t beta_mul_chialpha = (uint64_t)0;
-    for (int i = 0; i < num; ++i) {
+    for (int64_t i = 0; i < num; ++i) {
       uint64_t tmp = mult_mod(_mm_extract_epi64((block)delta2[i], 1),
                               check_chialpha_buf[i]);
       beta_mul_chialpha = add_mod(beta_mul_chialpha, tmp);
@@ -176,7 +176,7 @@ public:
     netio->flush();
 
     uint64_t va = PR - _mm_extract_epi64((block)z, 0);
-    for (int i = 0; i < num; ++i)
+    for (int64_t i = 0; i < num; ++i)
       va = mod(va + check_VW_buf[i], pr);
 
     Hash hash;

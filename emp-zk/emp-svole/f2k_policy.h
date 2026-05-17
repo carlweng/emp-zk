@@ -56,7 +56,7 @@ struct F2kPolicy {
       if (party == BOB) delta = ferret->Delta;
     }
 
-    void extend(AuthValue<F2kPolicy> *out, int num) {
+    void extend(AuthValue<F2kPolicy> *out, int64_t num) {
       // Pull num*128 OTs out of the long-lived ferret session via
       // rcot_*_next chunks. Caller must have an open ferret session
       // (the bool backend opens one ctor->dtor; standalone tests have
@@ -64,7 +64,7 @@ struct F2kPolicy {
       std::vector<block> ferret_buffer((std::size_t)num * 128);
       const int64_t chunk = ferret->chunk_ots();
       std::vector<block> chunk_buf(chunk);
-      int64_t needed = (int64_t)num * 128, got = 0;
+      int64_t needed = num * 128, got = 0;
       // ferret_party = 3-party; ferret is the OT-sender exactly when
       // this side is BOB.
       const bool sender = (party == BOB);

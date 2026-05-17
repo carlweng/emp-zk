@@ -19,14 +19,14 @@ public:
   using AV = AuthValue<P>;
 
   int party;
-  int k, n;
+  int64_t k, n;
   block seed;
   uint32_t k_mask;
 
   AV *out_buf = nullptr;
   const AV *pre_buf = nullptr;
 
-  LpnAmplifier(int n, int k, block seed = zero_block)
+  LpnAmplifier(int64_t n, int64_t k, block seed = zero_block)
       : k(k), n(n), seed(seed) {
     k_mask = 1;
     while (k_mask < (uint32_t)k) {
@@ -36,7 +36,7 @@ public:
   }
 
   // ALICE: fold val + mac.
-  void add2(int idx1, uint32_t *idx2) {
+  void add2(int64_t idx1, uint32_t *idx2) {
     for (int j = 0; j < d; ++j) {
       out_buf[idx1].val = P::k_add(out_buf[idx1].val, pre_buf[idx2[j]].val);
       out_buf[idx1].mac = P::f_add(out_buf[idx1].mac, pre_buf[idx2[j]].mac);
@@ -44,14 +44,14 @@ public:
   }
 
   // BOB: fold only mac.
-  void add1(int idx1, uint32_t *idx2) {
+  void add1(int64_t idx1, uint32_t *idx2) {
     for (int j = 0; j < d; ++j) {
       out_buf[idx1].mac = P::f_add(out_buf[idx1].mac, pre_buf[idx2[j]].mac);
     }
   }
 
-  void __compute4(int i, PRP *prp,
-                  std::function<void(int, uint32_t *)> add_func) {
+  void __compute4(int64_t i, PRP *prp,
+                  std::function<void(int64_t, uint32_t *)> add_func) {
     block tmp[10];
     for (int m = 0; m < 10; ++m)
       tmp[m] = makeBlock(i, m);
@@ -66,8 +66,8 @@ public:
     }
   }
 
-  void __compute1(int i, PRP *prp,
-                  std::function<void(int, uint32_t *)> add_func) {
+  void __compute1(int64_t i, PRP *prp,
+                  std::function<void(int64_t, uint32_t *)> add_func) {
     block tmp[3];
     for (int m = 0; m < 3; ++m)
       tmp[m] = makeBlock(i, m);
@@ -82,9 +82,9 @@ public:
 
   void compute() {
     PRP prp(seed);
-    int j = 0;
+    int64_t j = 0;
     if (party == ALICE) {
-      std::function<void(int, uint32_t *)> add_func1 = std::bind(
+      std::function<void(int64_t, uint32_t *)> add_func1 = std::bind(
           &LpnAmplifier::add2, this, std::placeholders::_1,
           std::placeholders::_2);
       for (; j < n - 4; j += 4)
@@ -92,7 +92,7 @@ public:
       for (; j < n; ++j)
         __compute1(j, &prp, add_func1);
     } else {
-      std::function<void(int, uint32_t *)> add_func2 = std::bind(
+      std::function<void(int64_t, uint32_t *)> add_func2 = std::bind(
           &LpnAmplifier::add1, this, std::placeholders::_1,
           std::placeholders::_2);
       for (; j < n - 4; j += 4)

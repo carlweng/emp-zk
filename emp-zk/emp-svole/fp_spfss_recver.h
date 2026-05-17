@@ -38,7 +38,7 @@ public:
     return choice_pos;
   }
 
-  template <typename OT> void recv(OT *ot, IO *io2, int s) {
+  template <typename OT> void recv(OT *ot, IO *io2, int64_t s) {
     ot->recv(m.data(), b.get(), depth - 1, io2, s);
     io2->recv_data(&share, sizeof(uint64_t));
   }

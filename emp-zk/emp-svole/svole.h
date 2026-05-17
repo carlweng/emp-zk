@@ -53,8 +53,8 @@ public:
   IO *io;
   int party;
   SVoleParam param;
-  int M;
-  int ot_used, ot_limit;
+  int64_t M;
+  int64_t ot_used, ot_limit;
   std::vector<AV> pre_auth;          // carry-over (size n_pre)
   std::vector<AV> vole_buf;          // current round (size n)
 
@@ -89,13 +89,13 @@ public:
     return P::f_zero();
   }
 
-  void extend(AV *out, int num) {
+  void extend(AV *out, int64_t num) {
     while (num > 0) {
       if (ot_used >= ot_limit) {
         extend_round();
         ot_used = 0;
       }
-      int take = (int)std::min<int64_t>(num, (int64_t)ot_limit - ot_used);
+      int64_t take = std::min<int64_t>(num, ot_limit - ot_used);
       std::memcpy(out, vole_buf.data() + ot_used, take * sizeof(AV));
       out += take;
       num -= take;
@@ -104,7 +104,7 @@ public:
   }
 
 private:
-  void extend_send(AV *out, AV *pre, int tt,
+  void extend_send(AV *out, AV *pre, int64_t tt,
                    MpfssReg<P, IO> *mpfss, OTPre<IO> *ot_pre,
                    LpnAmplifier<P, 10> *lpn) {
     mpfss->recver_init();
@@ -112,7 +112,7 @@ private:
     lpn->compute_send(pre + tt, out);
   }
 
-  void extend_recv(AV *out, AV *pre, int tt,
+  void extend_recv(AV *out, AV *pre, int64_t tt,
                    MpfssReg<P, IO> *mpfss, OTPre<IO> *ot_pre,
                    LpnAmplifier<P, 10> *lpn) {
     mpfss->sender_init(Delta);
@@ -151,7 +151,7 @@ private:
     if (party == ALICE) base_cot->cot_gen_pre();
     else                base_cot->cot_gen_pre(Delta);
 
-    int M_pre = param.k_pre + param.t_pre + 1;
+    int64_t M_pre = param.k_pre + param.t_pre + 1;
     pre_auth.assign(param.n_pre, AV{});
     std::vector<AV> pre_auth0(M_pre, AV{});
 

@@ -64,13 +64,13 @@ public:
     return res;
   }
 
-  void send_data_internal(const void *data, size_t nbyte) override {
+  void send_data_internal(const void *data, int64_t nbyte) override {
     if (ptr != 0)
       flush();
     io->send_data(data, nbyte);
   }
 
-  void recv_data_internal(void *data, size_t nbyte) override {
+  void recv_data_internal(void *data, int64_t nbyte) override {
     if (ptr != NETWORK_STAGING_BUFFER_SIZE)
       flush();
     io->recv_data(data, nbyte);
@@ -109,39 +109,39 @@ public:
 #endif
   }
 
-  void send_bool_raw(const bool *data, int length) {
-    if (tmp_arr.size() < (size_t)length / 8)
+  void send_bool_raw(const bool *data, int64_t length) {
+    if ((int64_t)tmp_arr.size() < length / 8)
       tmp_arr.resize(length / 8);
 
     auto *data64 = reinterpret_cast<const unsigned long long *>(data);
-    int whole = length / 8;
-    for (int i = 0; i < whole; ++i)
+    int64_t whole = length / 8;
+    for (int64_t i = 0; i < whole; ++i)
       tmp_arr[i] = pack_8bools(data64[i]);
     hash.put(tmp_arr.data(), whole);
     io->send_data(tmp_arr.data(), whole);
     counter += whole;
 
     if (8 * whole != length) {
-      int rem = length - 8 * whole;
+      int64_t rem = length - 8 * whole;
       hash.put(data + 8 * whole, rem);
       io->send_data(data + 8 * whole, rem);
       counter += rem;
     }
   }
-  void recv_bool_raw(bool *data, int length) {
-    if (tmp_arr.size() < (size_t)length / 8)
+  void recv_bool_raw(bool *data, int64_t length) {
+    if ((int64_t)tmp_arr.size() < length / 8)
       tmp_arr.resize(length / 8);
 
-    int whole = length / 8;
+    int64_t whole = length / 8;
     io->recv_data(tmp_arr.data(), whole);
     hash.put(tmp_arr.data(), whole);
 
     auto *data64 = reinterpret_cast<unsigned long long *>(data);
-    for (int i = 0; i < whole; ++i)
+    for (int64_t i = 0; i < whole; ++i)
       data64[i] = unpack_8bools(tmp_arr[i]);
 
     if (8 * whole != length) {
-      int rem = length - 8 * whole;
+      int64_t rem = length - 8 * whole;
       io->recv_data(data + 8 * whole, rem);
       hash.put(data + 8 * whole, rem);
     }

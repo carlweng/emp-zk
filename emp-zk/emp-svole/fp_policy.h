@@ -60,7 +60,7 @@ struct FpPolicy {
     Bootstrap(int party, IO *io, FerretCOT * /*ferret*/, F delta = 0)
         : party(party), io(io), Delta(delta) {}
 
-    void extend(AuthValue<FpPolicy> *out, int num) {
+    void extend(AuthValue<FpPolicy> *out, int64_t num) {
       Base_svole<IO> bv = (party == ALICE)
           ? Base_svole<IO>(party, io, (__uint128_t)Delta)
           : Base_svole<IO>(party, io);
@@ -117,8 +117,8 @@ public:
   IO *io;
   int party;
   SVoleFpParam param;
-  int M;
-  int ot_used, ot_limit;
+  int64_t M;
+  int64_t ot_used, ot_limit;
   std::vector<AuthValue<FpPolicy>> pre_yz;     // carry-over
   std::vector<AuthValue<FpPolicy>> vole_buf;   // current round's output
 
@@ -156,13 +156,13 @@ public:
 
   // Produce `num` fresh sVOLE pairs into `out`. Refills the internal
   // working buffer one round at a time as needed.
-  void extend(AuthValue<FpPolicy> *out, int num) {
+  void extend(AuthValue<FpPolicy> *out, int64_t num) {
     while (num > 0) {
       if (ot_used >= ot_limit) {
         extend_round();
         ot_used = 0;
       }
-      int take = (int)std::min<int64_t>(num, (int64_t)ot_limit - ot_used);
+      int64_t take = std::min<int64_t>(num, ot_limit - ot_used);
       std::memcpy(out, vole_buf.data() + ot_used,
                   take * sizeof(AuthValue<FpPolicy>));
       out += take;
@@ -172,7 +172,7 @@ public:
   }
 
   // Debug helper preserved for compatibility with vole_triple test.
-  void check_triple(__uint128_t x, __uint128_t *y, int size) {
+  void check_triple(__uint128_t x, __uint128_t *y, int64_t size) {
     if (party == ALICE) {
       io->send_data(&x, sizeof(__uint128_t));
       io->send_data(y, size * sizeof(__uint128_t));
@@ -181,7 +181,7 @@ public:
       std::vector<__uint128_t> k(size);
       io->recv_data(&delta, sizeof(__uint128_t));
       io->recv_data(k.data(), size * sizeof(__uint128_t));
-      for (int i = 0; i < size; ++i) {
+      for (int64_t i = 0; i < size; ++i) {
         __uint128_t tmp = mod(delta * (y[i] >> 64), pr);
         tmp = mod(tmp + k[i], pr);
         if (tmp != (y[i] & 0xFFFFFFFFFFFFFFFFLL)) {
@@ -239,10 +239,10 @@ private:
     mpfss_pre.set_malicious();
     OTPre<IO> pre_ot_ini(io, mpfss_pre.tree_height - 1, mpfss_pre.tree_n);
 
-    int M_pre = pre_ot_ini.n;
+    int64_t M_pre = pre_ot_ini.n;
     cot->cot_gen(&pre_ot_ini, M_pre);
 
-    int triple_n = 1 + mpfss_pre.tree_n + param.k_pre;
+    int64_t triple_n = 1 + mpfss_pre.tree_n + param.k_pre;
     Base_svole<IO> *svole0;
     pre_yz.assign(param.n_pre, AuthValue<FpPolicy>{0, 0});
     std::vector<AuthValue<FpPolicy>> seed_pairs(triple_n);

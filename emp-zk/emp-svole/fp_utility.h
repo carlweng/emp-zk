@@ -185,24 +185,24 @@ inline void extract_fp(__uint128_t &x) {
   x = mod(_mm_extract_epi64((block)x, 0));
 }
 
-template <typename T> void uni_hash_coeff_gen(T *coeff, T seed, int sz) {
+template <typename T> void uni_hash_coeff_gen(T *coeff, T seed, int64_t sz) {
   coeff[0] = seed;
-  for (int i = 1; i < sz; ++i)
+  for (int64_t i = 1; i < sz; ++i)
     coeff[i] = mult_mod(coeff[i - 1], seed);
 }
 
 template <typename T>
-T vector_inn_prdt_sum_red(const T *a, const T *b, int sz) {
+T vector_inn_prdt_sum_red(const T *a, const T *b, int64_t sz) {
   T res = (T)0;
-  for (int i = 0; i < sz; ++i)
+  for (int64_t i = 0; i < sz; ++i)
     res = add_mod(res, mult_mod(a[i], b[i]));
   return res;
 }
 
 template <typename S, typename T>
-T vector_inn_prdt_sum_red(const S *a, const T *b, int sz) {
+T vector_inn_prdt_sum_red(const S *a, const T *b, int64_t sz) {
   T res = (T)0;
-  for (int i = 0; i < sz; ++i)
+  for (int64_t i = 0; i < sz; ++i)
     res = add_mod(res, mult_mod((T)a[i], b[i]));
   return res;
 }

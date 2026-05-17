@@ -57,7 +57,7 @@ public:
     secret_sum ^= gamma;
   }
 
-  template <typename OT> void send(OT *ot, IO *io2, int s) {
+  template <typename OT> void send(OT *ot, IO *io2, int64_t s) {
     ot->send(m.data(), m.data() + (depth - 1), depth - 1, io2, s);
     io2->send_data(&secret_sum, sizeof(block));
     io2->flush();

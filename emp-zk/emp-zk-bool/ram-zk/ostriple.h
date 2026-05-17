@@ -17,7 +17,7 @@ public:
   int party;
   block delta;
 
-  int authf2k_cnt = 0, check_cnt = 0;
+  int64_t authf2k_cnt = 0, check_cnt = 0;
   std::vector<AuthValue<F2kPolicy>> auth_buffer;
   std::vector<block> andgate_buffer_left_val;
   std::vector<block> andgate_buffer_left_mac;
@@ -87,7 +87,7 @@ public:
   // Polynomial-value hook: ALICE returns ⊗_i vals[i] (gfmul chain over
   // the N input cleartext blocks); BOB returns zero_block (it has no
   // cleartext). Drives the templated compute_mul_poly<N> below.
-  virtual block compute_mul_v(int N, const block *vals) = 0;
+  virtual block compute_mul_v(int64_t N, const block *vals) = 0;
 
   // ---- compute_mul_poly<N> ---------------------------------------------
   //
@@ -208,9 +208,9 @@ public:
   }
 
   // Prover: chain-multiply N values: v = vals[0] * vals[1] * … * vals[N-1].
-  block compute_mul_v(int N, const block *vals) override {
+  block compute_mul_v(int64_t N, const block *vals) override {
     block v = vals[0];
-    for (int i = 1; i < N; ++i) gfmul(vals[i], v, &v);
+    for (int64_t i = 1; i < N; ++i) gfmul(vals[i], v, &v);
     return v;
   }
 
@@ -242,16 +242,16 @@ public:
   }
 
 private:
-  void andgate_correctness_check_alice(block *ret, uint32_t task_n,
+  void andgate_correctness_check_alice(block *ret, int64_t task_n,
                                        block chi_seed) {
     if (task_n == 0) return;
     block *lval = andgate_buffer_left_val.data();
     block *lmac = andgate_buffer_left_mac.data();
     block *rval = andgate_buffer_rght_val.data();
     block *rmac = andgate_buffer_rght_mac.data();
-    const int omac_base = authf2k_cnt - check_cnt;
+    const int64_t omac_base = authf2k_cnt - check_cnt;
 
-    for (uint32_t i = 0; i < task_n; ++i) {
+    for (int64_t i = 0; i < task_n; ++i) {
       block A0, A1, tmp;
       gfmul(lmac[i], rmac[i], &A0);
       gfmul(lval[i], rmac[i], &tmp);
@@ -336,7 +336,7 @@ public:
   }
 
   // Verifier: no cleartext, so v is always zero.
-  block compute_mul_v(int, const block *) override { return zero_block; }
+  block compute_mul_v(int64_t, const block *) override { return zero_block; }
 
   void andgate_correctness_check_manage() override {
     io->flush();
@@ -362,15 +362,15 @@ public:
   }
 
 private:
-  void andgate_correctness_check_bob(block *ret, uint32_t task_n,
+  void andgate_correctness_check_bob(block *ret, int64_t task_n,
                                      block chi_seed) {
     if (task_n == 0) return;
     block *lmac = andgate_buffer_left_mac.data();
     block *rmac = andgate_buffer_rght_mac.data();
-    const int omac_base = authf2k_cnt - check_cnt;
+    const int64_t omac_base = authf2k_cnt - check_cnt;
     block *lval = andgate_buffer_left_val.data();   // reused as scratch
 
-    for (uint32_t i = 0; i < task_n; ++i) {
+    for (int64_t i = 0; i < task_n; ++i) {
       block B, tmp;
       gfmul(lmac[i], rmac[i], &B);
       gfmul(auth_buffer[omac_base + i].mac, delta, &tmp);

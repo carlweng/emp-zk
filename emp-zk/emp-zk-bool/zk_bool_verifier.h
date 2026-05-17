@@ -51,7 +51,7 @@ public:
   void feed(void *out, int from_party, const bool *in, size_t n) override {
     block *label = static_cast<block *>(out);
     if (from_party == ALICE)
-      authenticated_bits_input(label, in, static_cast<int>(n));
+      authenticated_bits_input(label, in, static_cast<int64_t>(n));
     else if (from_party == PUBLIC)
       for (size_t i = 0; i < n; ++i) label[i] = pub_label[in[i]];
   }
@@ -59,7 +59,7 @@ public:
   void reveal(bool *out, int to_party, const void *in, size_t n) override {
     if (to_party == BOB || to_party == PUBLIC)
       verify_output(out, static_cast<const block *>(in),
-                    static_cast<int>(n));
+                    static_cast<int64_t>(n));
   }
 
 private:
@@ -67,9 +67,9 @@ private:
 
   // Authenticated-bit input: receive the prover's masking flips, fold them
   // into the COT keys to recover the per-bit MAC structure.
-  void authenticated_bits_input(block *auth, const bool *in, int len) {
+  void authenticated_bits_input(block *auth, const bool *in, int64_t len) {
     take_rcot(auth, len);
-    for (int i = 0; i < len; ++i) {
+    for (int64_t i = 0; i < len; ++i) {
       bool buff = io->recv_bit();
       auth[i] = clear_lsb(xor_delta_if(auth[i], buff));
     }
@@ -99,26 +99,26 @@ private:
   // Output reveal: receive each claimed cleartext bit, recompute the
   // expected MAC under our own delta, drop into the auth_hash transcript.
   // The destructor compares this digest against the prover's.
-  void verify_output(bool *b, const block *output, int length) {
-    for (int i = 0; i < length; ++i)
+  void verify_output(bool *b, const block *output, int64_t length) {
+    for (int64_t i = 0; i < length; ++i)
       b[i] = io->recv_bit();
-    if (auth_tmp.size() < (size_t)length)
+    if ((int64_t)auth_tmp.size() < length)
       auth_tmp.resize(length);
-    for (int i = 0; i < length; ++i)
+    for (int64_t i = 0; i < length; ++i)
       auth_tmp[i] = xor_delta_if(output[i], b[i]);
     auth_hash.put_block(auth_tmp.data(), length);
   }
 
   // ---- Per-thread + aggregation hooks (called from base skeleton) -------
 
-  void andgate_correctness_check(block *ret, uint32_t task_n,
+  void andgate_correctness_check(block *ret, int64_t task_n,
                                  block chi_seed) override {
     if (task_n == 0) return;
     block *left    = andgate_left_buffer.data();
     block *right   = andgate_right_buffer.data();
     block *gateout = andgate_out_buffer.data();
 
-    for (uint32_t i = 0; i < task_n; ++i) {
+    for (int64_t i = 0; i < task_n; ++i) {
       block B;
       gfmul(left[i], right[i], &B);
       block tmp;

@@ -11,10 +11,10 @@ template <typename IO> class FpOSTriple {
 public:
   int party;
   int threads;
-  int triple_n;
+  int64_t triple_n;
   __uint128_t delta;
 
-  int check_cnt = 0;
+  int64_t check_cnt = 0;
   std::vector<__uint128_t> andgate_out_buffer;
   std::vector<__uint128_t> andgate_left_buffer;
   std::vector<__uint128_t> andgate_right_buffer;
@@ -26,7 +26,7 @@ public:
   FpAuthHelper<IO> *auth_helper = nullptr;
   ThreadPool *pool = nullptr;
 
-  uint64_t CHECK_SZ = 1024 * 1024;
+  int64_t CHECK_SZ = 1024 * 1024;
 
   FpOSTriple(int party, int threads, IO **ios) {
     this->party = party;
@@ -70,11 +70,11 @@ public:
     return (__uint128_t)makeBlock(w, LOW64(mac));
   }
 
-  void authenticated_val_input(__uint128_t *label, const uint64_t *w, int len) {
+  void authenticated_val_input(__uint128_t *label, const uint64_t *w, int64_t len) {
     std::vector<uint64_t> lam(len);
     vole->extend((AuthValue<FpPolicy> *)label, len);
 
-    for (int i = 0; i < len; ++i) {
+    for (int64_t i = 0; i < len; ++i) {
       lam[i] = PR - w[i];
       lam[i] = add_mod(HIGH64(label[i]), lam[i]);
       label[i] = (__uint128_t)makeBlock(w[i], LOW64(label[i]));
@@ -95,13 +95,13 @@ public:
     return key;
   }
 
-  void authenticated_val_input(__uint128_t *label, int len) {
+  void authenticated_val_input(__uint128_t *label, int64_t len) {
     std::vector<uint64_t> lam(len);
     vole->extend((AuthValue<FpPolicy> *)label, len);
 
     io->recv_data(lam.data(), len * sizeof(uint64_t));
 
-    for (int i = 0; i < len; ++i) {
+    for (int64_t i = 0; i < len; ++i) {
       lam[i] = mult_mod(lam[i], delta);
       label[i] = add_mod(label[i], lam[i]);
     }
@@ -281,8 +281,8 @@ public:
    * verify the output
    * open and check if the value equals 1
    */
-  void reveal_send(const __uint128_t *output, uint64_t *value, int len) {
-    for (int i = 0; i < len; ++i) {
+  void reveal_send(const __uint128_t *output, uint64_t *value, int64_t len) {
+    for (int64_t i = 0; i < len; ++i) {
       value[i] = HIGH64(output[i]);
       uint64_t mac = LOW64(output[i]);
       auth_helper->store(mac); // TODO
@@ -290,9 +290,9 @@ public:
     io->send_data(value, len * sizeof(uint64_t));
   }
 
-  void reveal_recv(const __uint128_t *output, uint64_t *value, int len) {
+  void reveal_recv(const __uint128_t *output, uint64_t *value, int64_t len) {
     io->recv_data(value, len * sizeof(uint64_t));
-    for (int i = 0; i < len; ++i) {
+    for (int64_t i = 0; i < len; ++i) {
       uint64_t mac = mult_mod(value[i], LOW64(delta));
       mac = add_mod(mac, LOW64(output[i]));
       auth_helper->store(mac); // TODO
@@ -300,21 +300,21 @@ public:
   }
 
   void reveal_check_send(const __uint128_t *output, const uint64_t *value,
-                         int len) {
+                         int64_t len) {
     std::vector<uint64_t> val_real(len);
     reveal_send(output, val_real.data(), len);
   }
 
   void reveal_check_recv(const __uint128_t *output, const uint64_t *val_exp,
-                         int len) {
+                         int64_t len) {
     std::vector<uint64_t> val_real(len);
     reveal_recv(output, val_real.data(), len);
     if (memcmp(val_exp, val_real.data(), len * sizeof(uint64_t)) != 0)
       error("arithmetic reveal value not expected");
   }
 
-  void reveal_check_zero(const __uint128_t *output, int len) {
-    for (int i = 0; i < len; ++i) {
+  void reveal_check_zero(const __uint128_t *output, int64_t len) {
+    for (int64_t i = 0; i < len; ++i) {
       uint64_t mac = LOW64(output[i]);
       auth_helper->store(mac);
     }
@@ -341,13 +341,13 @@ public:
   }
 
   // sender
-  void refill_send(__uint128_t *yz, int *cnt, int sz) {
+  void refill_send(__uint128_t *yz, int64_t *cnt, int64_t sz) {
     vole->extend((AuthValue<FpPolicy> *)yz, sz);
     *cnt = 0;
   }
 
   // recver
-  void refill_recv(__uint128_t *yz, int *cnt, int sz) {
+  void refill_recv(__uint128_t *yz, int64_t *cnt, int64_t sz) {
     vole->extend((AuthValue<FpPolicy> *)yz, sz);
     *cnt = 0;
   }
@@ -460,13 +460,13 @@ public:
 
   /* ---------------------debug functions----------------------*/
 
-  void check_auth_mac(__uint128_t *auth, int len) {
+  void check_auth_mac(__uint128_t *auth, int64_t len) {
     if (party == ALICE) {
       io->send_data(auth, len * sizeof(__uint128_t));
     } else {
       std::vector<__uint128_t> auth_recv(len);
       io->recv_data(auth_recv.data(), len * sizeof(__uint128_t));
-      for (int i = 0; i < len; ++i) {
+      for (int64_t i = 0; i < len; ++i) {
         __uint128_t mac = mod((auth_recv[i] >> 64) * delta, pr);
         mac = mod(mac + auth[i], pr);
         if ((auth_recv[i] & (__uint128_t)0xFFFFFFFFFFFFFFFFLL) != mac) {
@@ -478,7 +478,7 @@ public:
   }
 
   void check_compute_mul(__uint128_t *a, __uint128_t *b, __uint128_t *c,
-                         int len) {
+                         int64_t len) {
     if (party == ALICE) {
       io->send_data(a, len * sizeof(__uint128_t));
       io->send_data(b, len * sizeof(__uint128_t));
@@ -488,7 +488,7 @@ public:
       io->recv_data(ar.data(), len * sizeof(__uint128_t));
       io->recv_data(br.data(), len * sizeof(__uint128_t));
       io->recv_data(cr.data(), len * sizeof(__uint128_t));
-      for (int i = 0; i < len; ++i) {
+      for (int64_t i = 0; i < len; ++i) {
         __uint128_t product = mod((ar[i] >> 64) * (br[i] >> 64), pr);
         if (product != (cr[i] >> 64))
           error("wrong product");

@@ -13,14 +13,14 @@ using Integer = SignedInt;
 
 class PolyProof {
 public:
-  static constexpr int buffer_sz = 1 << 20;
+  static constexpr int64_t buffer_sz = 1 << 20;
 
   int party;
   IOChannel *io;
   block delta;
   std::vector<block> buffer;  // ALICE: A0 (Δ⁰ coeff); BOB: full B = poly(Δ)
   std::vector<block> buffer1; // ALICE: A1 (Δ¹ coeff); BOB: unused
-  int num;
+  int64_t num;
   GaloisFieldPacking pack;
   FerretCOT *ferret = nullptr;
   // Scratch for one rcot_*_next chunk; allocated lazily on first
@@ -61,7 +61,7 @@ public:
       uint64_t choice_bits[2];
       for (int i = 0; i < 2; ++i) {
         choice_bits[i] = 0;
-        for (int j = 63; j >= 0; --j) {
+        for (int64_t j = 63; j >= 0; --j) {
           choice_bits[i] <<= 1;
           if (getLSB(ope_data[i * 64 + j]))
             choice_bits[i] |= 0x1;
@@ -125,19 +125,19 @@ public:
     return t;
   }
 
-  inline void zkp_poly_deg2(block *polyx, block *polyy, bool *coeff, int len) {
+  inline void zkp_poly_deg2(block *polyx, block *polyy, bool *coeff, int64_t len) {
     if (num >= buffer_sz)
       batch_check();
     if (party == ALICE) {
       block A0 = zero_block, A1 = zero_block;
-      for (int i = 0; i < len; ++i)
+      for (int64_t i = 0; i < len; ++i)
         if (coeff[i + 1])
           accumulate_alice(polyx[i], polyy[i], A0, A1);
       buffer[num] = A0;
       buffer1[num] = A1;
     } else {
       block B = zero_block;
-      for (int i = 0; i < len; ++i)
+      for (int64_t i = 0; i < len; ++i)
         if (coeff[i + 1])
           accumulate_bob(polyx[i], polyy[i], B);
       B = B ^ bob_constant_term(coeff[0]);
@@ -147,18 +147,18 @@ public:
   }
 
   inline void zkp_inner_prdt(block *polyx, block *polyy, bool constant,
-                             int len) {
+                             int64_t len) {
     if (num >= buffer_sz)
       batch_check();
     if (party == ALICE) {
       block A0 = zero_block, A1 = zero_block;
-      for (int i = 0; i < len; ++i)
+      for (int64_t i = 0; i < len; ++i)
         accumulate_alice(polyx[i], polyy[i], A0, A1);
       buffer[num] = A0;
       buffer1[num] = A1;
     } else {
       block B = zero_block;
-      for (int i = 0; i < len; ++i)
+      for (int64_t i = 0; i < len; ++i)
         accumulate_bob(polyx[i], polyy[i], B);
       B = B ^ bob_constant_term(constant);
       buffer[num] = B;
@@ -167,22 +167,22 @@ public:
   }
 
   inline void zkp_inner_prdt_eq(block *polyx, block *polyy, block *r, block *s,
-                                int len, int len2) {
+                                int64_t len, int64_t len2) {
     if (num >= buffer_sz)
       batch_check();
     if (party == ALICE) {
       block A0 = zero_block, A1 = zero_block;
-      for (int i = 0; i < len; ++i)
+      for (int64_t i = 0; i < len; ++i)
         accumulate_alice(polyx[i], polyy[i], A0, A1);
-      for (int i = 0; i < len2; ++i)
+      for (int64_t i = 0; i < len2; ++i)
         accumulate_alice(r[i], s[i], A0, A1);
       buffer[num] = A0;
       buffer1[num] = A1;
     } else {
       block B = zero_block;
-      for (int i = 0; i < len; ++i)
+      for (int64_t i = 0; i < len; ++i)
         accumulate_bob(polyx[i], polyy[i], B);
-      for (int i = 0; i < len2; ++i)
+      for (int64_t i = 0; i < len2; ++i)
         accumulate_bob(r[i], s[i], B);
       buffer[num] = B;
     }
@@ -190,23 +190,23 @@ public:
   }
 
   inline void zkp_inner_prdt_eq(block *polyx, block *polyy, block *r, block *s,
-                                block *rr, block *ss, int len, int len2) {
+                                block *rr, block *ss, int64_t len, int64_t len2) {
     if (num >= buffer_sz)
       batch_check();
     if (party == ALICE) {
       block A0 = zero_block, A1 = zero_block;
-      for (int i = 0; i < len; ++i)
+      for (int64_t i = 0; i < len; ++i)
         accumulate_alice(polyx[i], polyy[i], A0, A1);
-      for (int i = 0; i < len2; ++i)
+      for (int64_t i = 0; i < len2; ++i)
         accumulate_alice(r[i], s[i], A0, A1);
       accumulate_alice(*rr, *ss, A0, A1);
       buffer[num] = A0;
       buffer1[num] = A1;
     } else {
       block B = zero_block;
-      for (int i = 0; i < len; ++i)
+      for (int64_t i = 0; i < len; ++i)
         accumulate_bob(polyx[i], polyy[i], B);
-      for (int i = 0; i < len2; ++i)
+      for (int64_t i = 0; i < len2; ++i)
         accumulate_bob(r[i], s[i], B);
       accumulate_bob(*rr, *ss, B);
       buffer[num] = B;
@@ -215,20 +215,20 @@ public:
   }
 
   inline void zkp_inner_prdt_multi(Integer *polyx, Integer *polyy, Bit *r,
-                                   Bit *s, int len, int in_width) {
-    for (int width = 0; width < in_width; ++width) {
+                                   Bit *s, int64_t len, int64_t in_width) {
+    for (int64_t width = 0; width < in_width; ++width) {
       if (num >= buffer_sz)
         batch_check();
       if (party == ALICE) {
         block A0 = zero_block, A1 = zero_block;
-        for (int i = 0; i < len; ++i)
+        for (int64_t i = 0; i < len; ++i)
           accumulate_alice(polyx[i][width].bit, polyy[0][i].bit, A0, A1);
         accumulate_alice(r[width].bit, s->bit, A0, A1);
         buffer[num] = A0;
         buffer1[num] = A1;
       } else {
         block B = zero_block;
-        for (int i = 0; i < len; ++i)
+        for (int64_t i = 0; i < len; ++i)
           accumulate_bob(polyx[i][width].bit, polyy[0][i].bit, B);
         accumulate_bob(r[width].bit, s->bit, B);
         buffer[num] = B;

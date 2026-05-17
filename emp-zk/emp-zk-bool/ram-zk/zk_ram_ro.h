@@ -8,7 +8,7 @@ template <typename IO> class ZKRamRO {
 public:
   double check1 = 0, check2 = 0, check3 = 0;
   int party;
-  int index_sz, val_sz;
+  int64_t index_sz, val_sz;
   uint64_t step = 0;
   vector<uint64_t> clear_mem;
   vector<block> check_MAC;
@@ -17,7 +17,7 @@ public:
   IO *io;
   block Delta;
   RamOSTripleBase<IO> *ostriple = nullptr;
-  ZKRamRO(int _party, int index_sz, int val_sz)
+  ZKRamRO(int _party, int64_t index_sz, int64_t val_sz)
       : party(_party), index_sz(index_sz), val_sz(val_sz) {
     auto *exec = emp::get_bool_backend();
     io = exec->io;

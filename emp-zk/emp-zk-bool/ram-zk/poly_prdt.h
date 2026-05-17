@@ -8,14 +8,14 @@ public:
   int party;
   IO *io;
   block delta[4];
-  int buffer_sz = 1 << 20;
+  int64_t buffer_sz = 1 << 20;
   std::vector<block> buffer0;
   std::vector<block> buffer1;
   std::vector<block> buffer2;
   std::vector<block> buffer3;
   std::vector<block> buffer4;
   FerretCOT *ferret = nullptr;
-  int num;
+  int64_t num;
 
   RamPolyPrdt(int party, IO *io, FerretCOT *ferret)
       : party(party), io(io), ferret(ferret) {

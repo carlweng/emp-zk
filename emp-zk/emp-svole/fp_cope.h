@@ -10,14 +10,14 @@ namespace emp {
 template <typename IO> class Cope {
 public:
   int party;
-  int m;
+  int64_t m;
   IO *io;
   __uint128_t delta;
   std::vector<PRG> G0, G1;
   std::unique_ptr<bool[]> delta_bool;
   __uint128_t mask;
 
-  Cope(int party, IO *io, int m) : party(party), m(m), io(io) {
+  Cope(int party, IO *io, int64_t m) : party(party), m(m), io(io) {
     mask = (__uint128_t)0xFFFFFFFFFFFFFFFFLL;
   }
 
@@ -32,7 +32,7 @@ public:
     otco.recv(K.data(), delta_bool.get(), m);
 
     G0.resize(m);
-    for (int i = 0; i < m; ++i)
+    for (int64_t i = 0; i < m; ++i)
       G0[i].reseed(K.data() + i);
   }
 
@@ -46,7 +46,7 @@ public:
 
     G0.resize(m);
     G1.resize(m);
-    for (int i = 0; i < m; ++i) {
+    for (int64_t i = 0; i < m; ++i) {
       G0[i].reseed(K.data() + i);
       G1[i].reseed(K.data() + m + i);
     }
@@ -55,7 +55,7 @@ public:
   // sender
   __uint128_t extend() {
     std::vector<__uint128_t> w(m), v(m);
-    for (int i = 0; i < m; ++i) {
+    for (int64_t i = 0; i < m; ++i) {
       G0[i].random_block((block *)(&w[i]), 1);
       extract_fp(w[i]);
     }
@@ -63,7 +63,7 @@ public:
     io->recv_data(v.data(), m * sizeof(__uint128_t));
     __uint128_t ch[2];
     ch[0] = (__uint128_t)0;
-    for (int i = 0; i < m; ++i) {
+    for (int64_t i = 0; i < m; ++i) {
       ch[1] = v[i];
       v[i] = mod(w[i] + ch[delta_bool[i]], pr);
     }
@@ -72,19 +72,19 @@ public:
   }
 
   // sender batch
-  void extend(__uint128_t *ret, int size) {
+  void extend(__uint128_t *ret, int64_t size) {
     std::vector<uint64_t> w(m * size), v(m * size);
-    for (int i = 0; i < m; ++i) {
+    for (int64_t i = 0; i < m; ++i) {
       G0[i].random_data(&w[i * size], size * sizeof(uint64_t));
-      for (int j = 0; j < size; ++j) {
+      for (int64_t j = 0; j < size; ++j) {
         w[i * size + j] = mod(w[i * size + j]);
       }
     }
 
     uint64_t ch[2];
     ch[0] = (uint64_t)0;
-    for (int i = 0; i < m; ++i) {
-      for (int j = 0; j < size; ++j) {
+    for (int64_t i = 0; i < m; ++i) {
+      for (int64_t j = 0; j < size; ++j) {
         io->recv_data(&v[i * size + j], sizeof(uint64_t));
         ch[1] = v[i * size + j];
         v[i * size + j] = add_mod(w[i * size + j], ch[delta_bool[i]]);
@@ -97,7 +97,7 @@ public:
   // recver
   __uint128_t extend(__uint128_t u) {
     std::vector<__uint128_t> w0(m), w1(m), tau(m);
-    for (int i = 0; i < m; ++i) {
+    for (int64_t i = 0; i < m; ++i) {
       G0[i].random_block((block *)(&w0[i]), 1);
       G1[i].random_block((block *)(&w1[i]), 1);
       extract_fp(w0[i]);
@@ -114,12 +114,12 @@ public:
   }
 
   // recver batch
-  void extend(__uint128_t *ret, uint64_t *u, int size) {
+  void extend(__uint128_t *ret, uint64_t *u, int64_t size) {
     std::vector<uint64_t> w0(m * size), w1(m * size);
-    for (int i = 0; i < m; ++i) {
+    for (int64_t i = 0; i < m; ++i) {
       G0[i].random_data(&w0[i * size], size * sizeof(uint64_t));
       G1[i].random_data(&w1[i * size], size * sizeof(uint64_t));
-      for (int j = 0; j < size; ++j) {
+      for (int64_t j = 0; j < size; ++j) {
         w0[i * size + j] = mod(w0[i * size + j]);
         w1[i * size + j] = mod(w1[i * size + j]);
 
@@ -136,7 +136,7 @@ public:
   void delta64_to_bool(bool *bdata, __uint128_t u128) {
     uint64_t *ptr = (uint64_t *)(&u128);
     uint64_t in = ptr[0];
-    for (int i = 0; i < m; ++i) {
+    for (int64_t i = 0; i < m; ++i) {
       bdata[i] = ((in & 0x1LL) == 1);
       in >>= 1;
     }
@@ -145,29 +145,29 @@ public:
   __uint128_t prm2pr(__uint128_t *a) {
     __uint128_t ret = (__uint128_t)0;
     __uint128_t tmp;
-    for (int i = 0; i < m; ++i) {
+    for (int64_t i = 0; i < m; ++i) {
       tmp = mod(a[i] << i, pr);
       ret = mod(ret + tmp, pr);
     }
     return ret;
   }
 
-  void prm2pr(__uint128_t *ret, __uint128_t *a, int size) {
+  void prm2pr(__uint128_t *ret, __uint128_t *a, int64_t size) {
     memset(ret, 0, size * sizeof(__uint128_t));
     __uint128_t tmp;
-    for (int i = 0; i < m; ++i) {
-      for (int j = 0; j < size; ++j) {
+    for (int64_t i = 0; i < m; ++i) {
+      for (int64_t j = 0; j < size; ++j) {
         tmp = mod(a[i * size + j] << i, pr);
         ret[j] = mod(ret[j] + tmp, pr);
       }
     }
   }
 
-  void prm2pr(__uint128_t *ret, uint64_t *a, int size) {
+  void prm2pr(__uint128_t *ret, uint64_t *a, int64_t size) {
     memset(ret, 0, size * sizeof(__uint128_t));
     __uint128_t tmp;
-    for (int i = 0; i < m; ++i) {
-      for (int j = 0; j < size; ++j) {
+    for (int64_t i = 0; i < m; ++i) {
+      for (int64_t j = 0; j < size; ++j) {
         tmp = (__uint128_t)a[i * size + j];
         tmp = mod(tmp << i, pr);
         ret[j] = (__uint128_t)add_mod(ret[j], tmp);
@@ -176,7 +176,7 @@ public:
   }
 
   // debug function
-  void check_triple(uint64_t *a, __uint128_t *b, int sz) {
+  void check_triple(uint64_t *a, __uint128_t *b, int64_t sz) {
     if (party == ALICE) {
       io->send_data(a, sizeof(uint64_t));
       io->send_data(b, sz * sizeof(__uint128_t));
@@ -185,7 +185,7 @@ public:
       std::vector<__uint128_t> c(sz);
       io->recv_data(&delta, sizeof(uint64_t));
       io->recv_data(c.data(), sz * sizeof(__uint128_t));
-      for (int i = 0; i < sz; ++i) {
+      for (int64_t i = 0; i < sz; ++i) {
         __uint128_t tmp = mod((__uint128_t)a[i] * delta, pr);
         tmp = mod(tmp + c[i], pr);
         if (tmp != b[i]) {

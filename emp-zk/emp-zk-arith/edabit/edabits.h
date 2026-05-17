@@ -158,21 +158,21 @@ public:
     return intfp_add_const(arith_candidate[edab_fp], diff);
   }
 
-  void bool2arith(__uint128_t *out, const Integer *in, size_t len) {
-    size_t off = 0;
+  void bool2arith(__uint128_t *out, const Integer *in, int64_t len) {
+    int64_t off = 0;
     while (off < len) {
       // Cap each chunk at the edabits remaining in the current buffer
       // (or N, the size of a fresh batch) so the chunk never spans a
       // regen boundary — edabits_gen_backend() inside next_edabits
       // does its own I/O and can't be interleaved with a bulk send.
-      size_t avail = (edabit_num > 0) ? edabit_num : N;
-      int num = static_cast<int>(std::min(len - off, avail));
+      int64_t avail = (edabit_num > 0) ? (int64_t)edabit_num : (int64_t)N;
+      int64_t num = std::min<int64_t>(len - off, avail);
 
       uint32_t edab_f2;
       std::vector<uint32_t> edab_fp(num);
       std::vector<uint64_t> diff(num);
       std::vector<Integer> diff_bool(num);
-      for (int i = 0; i < num; ++i) {
+      for (int64_t i = 0; i < num; ++i) {
         next_edabits(edab_f2, edab_fp[i]);
         diff_bool[i] = in[off + i] - bool_candidate[edab_f2];
         diff_bool[i] = diff_bool[i].select(diff_bool[i].bits[61],
@@ -183,7 +183,7 @@ public:
       else
         auth_helper->open_check_recv(diff.data(), diff_bool.data(), num);
       ios[0]->flush();
-      for (int i = 0; i < num; ++i)
+      for (int64_t i = 0; i < num; ++i)
         out[off + i] = intfp_add_const(arith_candidate[edab_fp[i]], diff[i]);
       off += num;
     }
@@ -206,17 +206,17 @@ public:
     return sum_boo.select(sum_boo.bits[61], sum_boo + int_boo_pr);
   }
 
-  void arith2bool(Integer *out, const __uint128_t *in, size_t len) {
-    size_t off = 0;
+  void arith2bool(Integer *out, const __uint128_t *in, int64_t len) {
+    int64_t off = 0;
     while (off < len) {
-      size_t avail = (edabit_num > 0) ? edabit_num : N;
-      int num = static_cast<int>(std::min(len - off, avail));
+      int64_t avail = (edabit_num > 0) ? (int64_t)edabit_num : (int64_t)N;
+      int64_t num = std::min<int64_t>(len - off, avail);
 
       uint32_t edab_fp;
       std::vector<uint32_t> edab_f2(num);
       std::vector<__uint128_t> sum_fp(num);
       std::vector<uint64_t> sum(num);
-      for (int i = 0; i < num; ++i) {
+      for (int64_t i = 0; i < num; ++i) {
         next_edabits(edab_f2[i], edab_fp);
         sum_fp[i] = intfp_add(arith_candidate[edab_fp], in[off + i]);
       }
@@ -225,7 +225,7 @@ public:
       else
         auth_helper->open_check_recv(sum.data(), sum_fp.data(), num);
       ios[0]->flush();
-      for (int i = 0; i < num; ++i) {
+      for (int64_t i = 0; i < num; ++i) {
         Integer sum_boo = Integer(62, sum[i], PUBLIC);
         sum_boo = sum_boo - bool_candidate[edab_f2[i]];
         out[off + i] =

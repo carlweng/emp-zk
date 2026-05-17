@@ -11,11 +11,11 @@ public:
   int party;
   IO *io;
   uint64_t delta;
-  int buffer_sz = 1024;
+  int64_t buffer_sz = 1024;
   std::vector<uint64_t> buffer;
   std::vector<uint64_t> buffer1;
   FpOSTriple<IO> *ostriple;
-  int num;
+  int64_t num;
 
   FpPolyProof(int party, IO *io, FpOSTriple<IO> *ostriple) {
     this->party = party;
@@ -73,14 +73,14 @@ public:
   }
 
   inline void zkp_poly_deg2(const __uint128_t *polyx, const __uint128_t *polyy,
-                            const uint64_t *coeff, int len) {
+                            const uint64_t *coeff, int64_t len) {
     if (num >= buffer_sz)
       batch_check();
 
     if (party == ALICE) {
       uint64_t A0 = 0, A1 = 0;
       uint64_t w0, w1, m0, m1, tmp;
-      for (int i = 0; i < len; ++i) {
+      for (int64_t i = 0; i < len; ++i) {
         w0 = HIGH64(polyx[i]);
         m0 = LOW64(polyx[i]);
         w1 = HIGH64(polyy[i]);
@@ -99,7 +99,7 @@ public:
     } else {
       uint64_t B = 0;
       uint64_t tmp;
-      for (int i = 0; i < len; ++i) {
+      for (int64_t i = 0; i < len; ++i) {
         tmp = mult_mod(LOW64(polyx[i]), LOW64(polyy[i]));
         tmp = mult_mod(coeff[i + 1], tmp);
         B = add_mod(B, tmp);
@@ -113,14 +113,14 @@ public:
   }
 
   inline void zkp_inner_prdt(const __uint128_t *polyx, const __uint128_t *polyy,
-                             uint64_t constant, int len) {
+                             uint64_t constant, int64_t len) {
     if (num >= buffer_sz)
       batch_check();
 
     if (party == ALICE) {
       uint64_t A0 = 0, A1 = 0;
       uint64_t w0, w1, m0, m1, tmp;
-      for (int i = 0; i < len; ++i) {
+      for (int64_t i = 0; i < len; ++i) {
         w0 = HIGH64(polyx[i]);
         m0 = LOW64(polyx[i]);
         w1 = HIGH64(polyy[i]);
@@ -137,7 +137,7 @@ public:
     } else {
       uint64_t B = 0;
       uint64_t tmp;
-      for (int i = 0; i < len; ++i) {
+      for (int64_t i = 0; i < len; ++i) {
         tmp = mult_mod(LOW64(polyx[i]), LOW64(polyy[i]));
         B = add_mod(B, tmp);
       }

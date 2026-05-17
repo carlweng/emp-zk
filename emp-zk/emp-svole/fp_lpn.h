@@ -18,7 +18,7 @@ namespace emp {
 template <int d = 10> class LpnFp {
 public:
   int party;
-  int k, n;
+  int64_t k, n;
   block seed;
 
   __uint128_t *M;
@@ -28,7 +28,7 @@ public:
 
   uint32_t k_mask;
 
-  LpnFp(int n, int k, block seed = zero_block)
+  LpnFp(int64_t n, int64_t k, block seed = zero_block)
       : k(k), n(n), seed(seed) {
     k_mask = 1;
     while (k_mask < (uint32_t)k) {
@@ -37,7 +37,7 @@ public:
     }
   }
 
-  void add2_single(int idx1, int *idx2) {
+  void add2_single(int64_t idx1, int *idx2) {
     block Midx1 = (block)M[idx1];
     for (int j = 0; j < 5; ++j)
       Midx1 = _mm_add_epi64(Midx1, (block)preM[idx2[j]]);
@@ -46,7 +46,7 @@ public:
       Midx1 = _mm_add_epi64(Midx1, (block)preM[idx2[j]]);
     M[idx1] = (__uint128_t)vec_mod(Midx1);
   }
-  void add1_single(int idx1, int *idx2) {
+  void add1_single(int64_t idx1, int *idx2) {
     uint64_t Kidx1 = K[idx1];
     for (int j = 0; j < 5; ++j)
       Kidx1 = Kidx1 + preK[idx2[j]];
@@ -56,7 +56,7 @@ public:
     K[idx1] = mod(Kidx1);
   }
 
-  void add2(int idx1, int *idx2) {
+  void add2(int64_t idx1, int *idx2) {
     block tmp[4];
     tmp[0] = (block)M[idx1];
     tmp[1] = (block)M[idx1 + 1];
@@ -85,7 +85,7 @@ public:
     M[idx1 + 3] = (__uint128_t)vec_mod(tmp[3]);
   }
 
-  void add1(int idx1, int *idx2) {
+  void add1(int64_t idx1, int *idx2) {
     uint64_t tmp[4];
     tmp[0] = 0;
     tmp[1] = 0;
@@ -114,7 +114,7 @@ public:
     K[idx1 + 3] = mod(K[idx1 + 3] + tmp[3]);
   }
 
-  void __compute4(int i, PRP *prp, std::function<void(int, int *)> add_func) {
+  void __compute4(int64_t i, PRP *prp, std::function<void(int64_t, int *)> add_func) {
     block tmp[10];
     for (int m = 0; m < 10; ++m)
       tmp[m] = makeBlock(i, m);
@@ -127,7 +127,7 @@ public:
     add_func(i, index);
   }
 
-  void __compute1(int i, PRP *prp, std::function<void(int, int *)> add_func) {
+  void __compute1(int64_t i, PRP *prp, std::function<void(int64_t, int *)> add_func) {
     block tmp[3];
     for (int m = 0; m < 3; ++m)
       tmp[m] = makeBlock(i, m);
@@ -143,11 +143,11 @@ public:
 
   void compute() {
     PRP prp(seed);
-    int j = 0;
+    int64_t j = 0;
     if (party == ALICE) {
-      std::function<void(int, int *)> add_func1 = std::bind(
+      std::function<void(int64_t, int *)> add_func1 = std::bind(
           &LpnFp::add1, this, std::placeholders::_1, std::placeholders::_2);
-      std::function<void(int, int *)> add_func1s =
+      std::function<void(int64_t, int *)> add_func1s =
           std::bind(&LpnFp::add1_single, this, std::placeholders::_1,
                     std::placeholders::_2);
       for (; j < n - 4; j += 4)
@@ -155,9 +155,9 @@ public:
       for (; j < n; ++j)
         __compute1(j, &prp, add_func1s);
     } else {
-      std::function<void(int, int *)> add_func2 = std::bind(
+      std::function<void(int64_t, int *)> add_func2 = std::bind(
           &LpnFp::add2, this, std::placeholders::_1, std::placeholders::_2);
-      std::function<void(int, int *)> add_func2s =
+      std::function<void(int64_t, int *)> add_func2s =
           std::bind(&LpnFp::add2_single, this, std::placeholders::_1,
                     std::placeholders::_2);
       for (; j < n - 4; j += 4)

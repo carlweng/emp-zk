@@ -14,14 +14,14 @@ public:
   vector<vector<block>> check_MAC;
   vector<vector<__uint128_t>> list;
   int party;
-  int index_sz, step_sz;
+  int64_t index_sz, step_sz;
   std::size_t val_sz, val_uint64_sz;
   IO *io;
   block Delta;
   GaloisFieldPacking gfp;
   RamOSTripleBase<IO> *ostriple = nullptr;
   // double online = 0, check1 = 0, check2 = 0;
-  ZKRamExt(int _party, int _index_sz, int _step_sz, std::size_t _val_sz)
+  ZKRamExt(int _party, int64_t _index_sz, int64_t _step_sz, std::size_t _val_sz)
       : party(_party), index_sz(_index_sz), step_sz(_step_sz), val_sz(_val_sz) {
     /*if(_val_sz % 64 != 0) {
         throw invalid_argument("input size in bytes should be divided by 8");

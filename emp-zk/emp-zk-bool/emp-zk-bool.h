@@ -23,31 +23,31 @@ inline void finalize_zk_bool() {
   backend = nullptr;
 }
 
-inline void zkp_poly_deg2(Bit *x, Bit *y, bool *coeff, int len) {
+inline void zkp_poly_deg2(Bit *x, Bit *y, bool *coeff, int64_t len) {
   get_bool_backend()->polyproof->zkp_poly_deg2((block *)x, (block *)y, coeff,
                                                len);
 }
 
-inline void zkp_inner_prdt(Bit *x, Bit *y, bool constant, int len) {
+inline void zkp_inner_prdt(Bit *x, Bit *y, bool constant, int64_t len) {
   get_bool_backend()->polyproof->zkp_inner_prdt((block *)x, (block *)y,
                                                 constant, len);
 }
 
-inline void zkp_inner_prdt_eq(Bit *x, Bit *y, Bit *r, Bit *s, int len,
-                              int len2) {
+inline void zkp_inner_prdt_eq(Bit *x, Bit *y, Bit *r, Bit *s, int64_t len,
+                              int64_t len2) {
   get_bool_backend()->polyproof->zkp_inner_prdt_eq(
       (block *)x, (block *)y, (block *)r, (block *)s, len, len2);
 }
 
 inline void zkp_inner_prdt_eq(Bit *x, Bit *y, Bit *r, Bit *s, Bit *rr, Bit *ss,
-                              int len, int len2) {
+                              int64_t len, int64_t len2) {
   get_bool_backend()->polyproof->zkp_inner_prdt_eq(
       (block *)x, (block *)y, (block *)r, (block *)s, (block *)rr, (block *)ss,
       len, len2);
 }
 
 inline void zkp_inner_prdt_multi(Integer *x, Integer *y, Bit *r, Bit *s,
-                                 int len, int width) {
+                                 int64_t len, int64_t width) {
   get_bool_backend()->polyproof->zkp_inner_prdt_multi(x, y, r, s, len, width);
 }
 

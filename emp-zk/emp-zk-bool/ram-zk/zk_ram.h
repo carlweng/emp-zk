@@ -11,13 +11,13 @@ public:
   vector<block> check_MAC;
   vector<__uint128_t> list;
   int party;
-  int index_sz, step_sz, val_sz;
+  int64_t index_sz, step_sz, val_sz;
   IO *io;
   block Delta;
   GaloisFieldPacking gfp;
   RamOSTripleBase<IO> *ostriple = nullptr;
   double online = 0, check1 = 0, check2 = 0;
-  ZKRam(int _party, int index_sz, int step_sz, int val_sz)
+  ZKRam(int _party, int64_t index_sz, int64_t step_sz, int64_t val_sz)
       : party(_party), index_sz(index_sz), step_sz(step_sz), val_sz(val_sz) {
     capacity = (capacity << index_sz);
     mem.resize(capacity);

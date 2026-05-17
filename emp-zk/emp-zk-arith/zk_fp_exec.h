@@ -18,14 +18,14 @@ public:
 
   virtual void feed(__uint128_t &label, const uint64_t &value) = 0;
 
-  virtual void feed(__uint128_t *label, const uint64_t *value, int len) = 0;
+  virtual void feed(__uint128_t *label, const uint64_t *value, int64_t len) = 0;
 
-  virtual void reveal(__uint128_t *label, uint64_t *value, int len) = 0;
+  virtual void reveal(__uint128_t *label, uint64_t *value, int64_t len) = 0;
 
   virtual void reveal_check(__uint128_t *label, const uint64_t *value,
-                            int len) = 0;
+                            int64_t len) = 0;
 
-  virtual void reveal_check_zero(__uint128_t *label, int len) = 0;
+  virtual void reveal_check_zero(__uint128_t *label, int64_t len) = 0;
 
   virtual __uint128_t add_gate(const __uint128_t &a, const __uint128_t &b) = 0;
 

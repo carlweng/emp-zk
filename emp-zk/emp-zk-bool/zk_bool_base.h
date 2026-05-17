@@ -39,7 +39,7 @@ public:
   block pub_label[2];   // Labels for PUBLIC-input bits.
 
   // AND-gate triple buffer (ALICE-side: cleartext+MAC; BOB-side: keys only).
-  int check_cnt = 0;
+  int64_t check_cnt = 0;
   std::vector<block> andgate_out_buffer;
   std::vector<block> andgate_left_buffer;
   std::vector<block> andgate_right_buffer;
@@ -205,7 +205,7 @@ public:
   // Reduction over the buffered triples. ALICE writes the (Δ⁰, Δ¹)
   // coefficients into ret[0..1]; BOB writes its check polynomial into
   // ret[0].
-  virtual void andgate_correctness_check(block *ret, uint32_t task_n,
+  virtual void andgate_correctness_check(block *ret, int64_t task_n,
                                          block chi_seed) = 0;
 
   // Trailing role-specific aggregation: ALICE packs + sends `A_star`,

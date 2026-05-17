@@ -64,32 +64,32 @@ public:
   }
 };
 
-static inline void batch_feed(IntFp *obj, uint64_t *value, int len) {
+static inline void batch_feed(IntFp *obj, uint64_t *value, int64_t len) {
   ZKFpExec::zk_exec->feed((__uint128_t *)obj, value, len);
 }
 
-static inline void batch_reveal(IntFp *obj, uint64_t *value, int len) {
+static inline void batch_reveal(IntFp *obj, uint64_t *value, int64_t len) {
   ZKFpExec::zk_exec->reveal((__uint128_t *)obj, value, len);
 }
 
-static inline bool batch_reveal_check(IntFp *obj, uint64_t *expected, int len) {
+static inline bool batch_reveal_check(IntFp *obj, uint64_t *expected, int64_t len) {
   ZKFpExec::zk_exec->reveal_check((__uint128_t *)obj, expected, len);
   return true;
 }
 
-static inline bool batch_reveal_check_zero(IntFp *obj, int len) {
+static inline bool batch_reveal_check_zero(IntFp *obj, int64_t len) {
   ZKFpExec::zk_exec->reveal_check_zero((__uint128_t *)obj, len);
   return true;
 }
 
 template <typename IO>
-inline void fp_zkp_poly_deg2(IntFp *x, IntFp *y, uint64_t *coeff, int len) {
+inline void fp_zkp_poly_deg2(IntFp *x, IntFp *y, uint64_t *coeff, int64_t len) {
   FpPolyProof<IO>::fppolyproof->zkp_poly_deg2((__uint128_t *)x,
                                               (__uint128_t *)y, coeff, len);
 }
 
 template <typename IO>
-inline void fp_zkp_inner_prdt(IntFp *x, IntFp *y, uint64_t constant, int len) {
+inline void fp_zkp_inner_prdt(IntFp *x, IntFp *y, uint64_t constant, int64_t len) {
   FpPolyProof<IO>::fppolyproof->zkp_inner_prdt((__uint128_t *)x,
                                                (__uint128_t *)y, constant, len);
 }

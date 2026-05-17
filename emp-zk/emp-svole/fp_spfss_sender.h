@@ -58,7 +58,7 @@ public:
     secret_sum = add_mod((uint64_t)gamma, secret_sum);
   }
 
-  template <typename OT> void send(OT *ot, IO *io2, int s) {
+  template <typename OT> void send(OT *ot, IO *io2, int64_t s) {
     ot->send(m.data(), m.data() + (depth - 1), depth - 1, io2, s);
     io2->send_data(&secret_sum, sizeof(uint64_t));
     io2->flush();

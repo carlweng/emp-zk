@@ -10,7 +10,7 @@ template <typename IO> inline IntFp bool2arith(Integer &x) {
   return y;
 }
 
-template <typename IO> inline void bool2arith(IntFp *y, Integer *x, int sz) {
+template <typename IO> inline void bool2arith(IntFp *y, Integer *x, int64_t sz) {
   EdaBits<IO>::conv->bool2arith((__uint128_t *)y, x, sz);
 }
 
@@ -18,6 +18,6 @@ template <typename IO> inline Integer arith2bool(IntFp &x) {
   return EdaBits<IO>::conv->arith2bool(x.value);
 }
 
-template <typename IO> inline void arith2bool(Integer *y, IntFp *x, int sz) {
+template <typename IO> inline void arith2bool(Integer *y, IntFp *x, int64_t sz) {
   EdaBits<IO>::conv->arith2bool(y, (__uint128_t *)x, sz);
 }

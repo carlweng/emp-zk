@@ -43,7 +43,7 @@
 //   class Bootstrap {
 //    public:
 //     Bootstrap(int party, IO *io, FerretCOT *ferret, F Delta = f_zero());
-//     void extend(AuthValue<FieldPolicy> *out, int num);
+//     void extend(AuthValue<FieldPolicy> *out, int64_t num);
 //   };
 //
 // See f2k_policy.h for the concrete F_2 ⊂ F_{2^128} instantiation.

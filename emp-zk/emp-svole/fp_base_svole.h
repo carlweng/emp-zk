@@ -9,7 +9,7 @@ namespace emp {
 template <typename IO> class Base_svole {
 public:
   int party;
-  int m;
+  int64_t m;
   IO *io;
   Cope<IO> *cope;
   __uint128_t Delta;
@@ -34,7 +34,7 @@ public:
   ~Base_svole() { delete cope; }
 
   // sender
-  void triple_gen_send(__uint128_t *share, int size) {
+  void triple_gen_send(__uint128_t *share, int64_t size) {
     cope->extend(share, size);
     __uint128_t b;
     cope->extend(&b, 1);
@@ -42,11 +42,11 @@ public:
   }
 
   // recver
-  void triple_gen_recv(__uint128_t *share, int size) {
+  void triple_gen_recv(__uint128_t *share, int64_t size) {
     PRG prg;
     std::vector<uint64_t> x(size + 1);
     prg.random_data(x.data(), (size + 1) * sizeof(uint64_t));
-    for (int i = 0; i < size + 1; ++i) {
+    for (int64_t i = 0; i < size + 1; ++i) {
       x[i] = mod(x[i]);
     }
     cope->extend(share, x.data(), size);
@@ -54,12 +54,12 @@ public:
     cope->extend(&c, &x[size], 1);
     recver_check(share, x.data(), c, x[size], size);
 
-    for (int i = 0; i < size; ++i)
+    for (int64_t i = 0; i < size; ++i)
       share[i] = (__uint128_t)makeBlock(x[i], share[i]);
   }
 
   // sender check
-  void sender_check(__uint128_t *share, uint64_t b, int size) {
+  void sender_check(__uint128_t *share, uint64_t b, int64_t size) {
     PRG prg;
     uint64_t seed;
     prg.random_data(&seed, sizeof(uint64_t));
@@ -81,7 +81,7 @@ public:
 
   // receiver check
   void recver_check(__uint128_t *share, uint64_t *x, uint64_t c, uint64_t a,
-                    int size) {
+                    int64_t size) {
     uint64_t seed;
     io->recv_data(&seed, sizeof(uint64_t));
     std::vector<uint64_t> chi(size);

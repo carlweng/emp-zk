@@ -18,7 +18,7 @@ public:
   block delta;
 
   int64_t authf2k_cnt = 0, check_cnt = 0;
-  std::vector<AuthValue<F2kPolicy>> auth_buffer;
+  std::vector<F2kDefaultPolicy::AuthValue> auth_buffer;
   std::vector<block> andgate_buffer_left_val;
   std::vector<block> andgate_buffer_left_mac;
   std::vector<block> andgate_buffer_rght_val;
@@ -28,8 +28,8 @@ public:
 
   IO *io;
   PRG prg;
-  FerretCOT *ferret = nullptr;
-  SVole<F2kPolicy, IO> *svole = nullptr;
+  Ferret *ferret = nullptr;
+  F2kVOLE<F2kDefaultPolicy, IO> *svole = nullptr;
   RamPolyPrdt<IO> *polyprdt = nullptr;
   // One chunk of scratch for ferret->rcot_*_next; allocated lazily in
   // andgate_correctness_check_manage. The bool backend opens the
@@ -38,13 +38,13 @@ public:
 
   int64_t BUFFER_SZ = -1;
 
-  RamOSTripleBase(int party, IO *io, FerretCOT *ferret)
+  RamOSTripleBase(int party, IO *io, Ferret *ferret)
       : party(party), io(io), ferret(ferret) {
     if (party == BOB)
       this->delta = ferret->Delta;
     else
       this->delta = zero_block;
-    svole = new SVole<F2kPolicy, IO>(party, io, ferret, delta);
+    svole = new F2kVOLE<F2kDefaultPolicy, IO>(party, io, ferret, delta);
     BUFFER_SZ = svole->ot_limit;
 
     auth_buffer.resize(BUFFER_SZ);
@@ -169,7 +169,7 @@ public:
   using Base::BUFFER_SZ;
   using Base::pre_f2k_buffer_refill;
 
-  RamOSTripleProver(IO *io, FerretCOT *ferret) : Base(ALICE, io, ferret) {}
+  RamOSTripleProver(IO *io, Ferret *ferret) : Base(ALICE, io, ferret) {}
 
   ~RamOSTripleProver() override {
     if (check_cnt != 0) andgate_correctness_check_manage();
@@ -293,7 +293,7 @@ public:
   using Base::BUFFER_SZ;
   using Base::pre_f2k_buffer_refill;
 
-  RamOSTripleVerifier(IO *io, FerretCOT *ferret) : Base(BOB, io, ferret) {}
+  RamOSTripleVerifier(IO *io, Ferret *ferret) : Base(BOB, io, ferret) {}
 
   ~RamOSTripleVerifier() override {
     if (check_cnt != 0) andgate_correctness_check_manage();

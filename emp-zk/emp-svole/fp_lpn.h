@@ -167,22 +167,20 @@ public:
     }
   }
 
-  // AuthValue<FpPolicy>* aliases __uint128_t* (mac-first layout): the
-  // public signatures take the typed form, internals reinterpret for
-  // the SIMD pair adds.
-  void compute_send(AuthValue<FpPolicy> *K_auth,
-                    const AuthValue<FpPolicy> *kkK_auth) {
+  // Operates on raw __uint128_t* (packed val<<64|mac). FpVOLE casts
+  // its AuthValue buffers to __uint128_t* at this boundary; byte
+  // layout matches by construction.
+  void compute_send(__uint128_t *K_in, const __uint128_t *kkK_in) {
     this->party = ALICE;
-    this->K = (__uint128_t *)K_auth;
-    this->preK = (const __uint128_t *)kkK_auth;
+    this->K = K_in;
+    this->preK = kkK_in;
     compute();
   }
 
-  void compute_recv(AuthValue<FpPolicy> *M_auth,
-                    const AuthValue<FpPolicy> *kkM_auth) {
+  void compute_recv(__uint128_t *M_in, const __uint128_t *kkM_in) {
     this->party = BOB;
-    this->M = (__uint128_t *)M_auth;
-    this->preM = (const __uint128_t *)kkM_auth;
+    this->M = M_in;
+    this->preM = kkM_in;
     compute();
   }
 };

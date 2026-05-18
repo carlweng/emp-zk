@@ -22,7 +22,7 @@ public:
   IO *io;
   IO **ios;
   PRG prg;
-  SVole<FpPolicy, IO> *vole = nullptr;
+  FpVOLE<MersennePolicy61, IO> *vole = nullptr;
   FpAuthHelper<IO> *auth_helper = nullptr;
   ThreadPool *pool = nullptr;
 
@@ -36,14 +36,14 @@ public:
     pool = new ThreadPool(threads);
 
     if (party == BOB) delta_gen();
-    vole = new SVole<FpPolicy, IO>(3 - party, ios[0], nullptr,
+    vole = new FpVOLE<MersennePolicy61, IO>(3 - party, ios[0], nullptr,
                                     party == BOB ? (uint64_t)delta : 0);
 
     andgate_out_buffer.resize(CHECK_SZ);
     andgate_left_buffer.resize(CHECK_SZ);
     andgate_right_buffer.resize(CHECK_SZ);
     __uint128_t tmp;
-    vole->extend((AuthValue<FpPolicy> *)&tmp, 1);
+    vole->extend((MersennePolicy61::AuthValue *)&tmp, 1);
 
     auth_helper = new FpAuthHelper<IO>(party, io);
   }
@@ -62,7 +62,7 @@ public:
    */
   __uint128_t authenticated_val_input(uint64_t w) {
     __uint128_t mac;
-    vole->extend((AuthValue<FpPolicy> *)&mac, 1);
+    vole->extend((MersennePolicy61::AuthValue *)&mac, 1);
 
     uint64_t lam = PR - w;
     lam = add_mod(HIGH64(mac), lam);
@@ -72,7 +72,7 @@ public:
 
   void authenticated_val_input(__uint128_t *label, const uint64_t *w, int64_t len) {
     std::vector<uint64_t> lam(len);
-    vole->extend((AuthValue<FpPolicy> *)label, len);
+    vole->extend((MersennePolicy61::AuthValue *)label, len);
 
     for (int64_t i = 0; i < len; ++i) {
       lam[i] = PR - w[i];
@@ -84,7 +84,7 @@ public:
 
   __uint128_t authenticated_val_input() {
     __uint128_t key;
-    vole->extend((AuthValue<FpPolicy> *)&key, 1);
+    vole->extend((MersennePolicy61::AuthValue *)&key, 1);
 
     uint64_t lam;
     io->recv_data(&lam, sizeof(uint64_t));
@@ -97,7 +97,7 @@ public:
 
   void authenticated_val_input(__uint128_t *label, int64_t len) {
     std::vector<uint64_t> lam(len);
-    vole->extend((AuthValue<FpPolicy> *)label, len);
+    vole->extend((MersennePolicy61::AuthValue *)label, len);
 
     io->recv_data(lam.data(), len * sizeof(uint64_t));
 
@@ -116,7 +116,7 @@ public:
       andgate_correctness_check_manage();
       check_cnt = 0;
     }
-    vole->extend((AuthValue<FpPolicy> *)&mac, 1);
+    vole->extend((MersennePolicy61::AuthValue *)&mac, 1);
     andgate_left_buffer[check_cnt] = Ma;
     andgate_right_buffer[check_cnt] = Mb;
 
@@ -138,7 +138,7 @@ public:
       andgate_correctness_check_manage();
       check_cnt = 0;
     }
-    vole->extend((AuthValue<FpPolicy> *)&key, 1);
+    vole->extend((MersennePolicy61::AuthValue *)&key, 1);
     andgate_left_buffer[check_cnt] = Ka;
     andgate_right_buffer[check_cnt] = Kb;
 
@@ -210,7 +210,7 @@ public:
 
     if (party == ALICE) {
       __uint128_t ope_data;
-      vole->extend((AuthValue<FpPolicy> *)&ope_data, 1);
+      vole->extend((MersennePolicy61::AuthValue *)&ope_data, 1);
       uint64_t A0_star = LOW64(ope_data);
       uint64_t A1_star = HIGH64(ope_data);
       uint64_t check_sum[2];
@@ -219,7 +219,7 @@ public:
       io->send_data(check_sum, 2 * sizeof(uint64_t));
     } else {
       __uint128_t ope_data;
-      vole->extend((AuthValue<FpPolicy> *)&ope_data, 1);
+      vole->extend((MersennePolicy61::AuthValue *)&ope_data, 1);
       uint64_t B_star = LOW64(ope_data);
       W = add_mod(W, B_star);
       uint64_t check_sum[2];
@@ -342,13 +342,13 @@ public:
 
   // sender
   void refill_send(__uint128_t *yz, int64_t *cnt, int64_t sz) {
-    vole->extend((AuthValue<FpPolicy> *)yz, sz);
+    vole->extend((MersennePolicy61::AuthValue *)yz, sz);
     *cnt = 0;
   }
 
   // recver
   void refill_recv(__uint128_t *yz, int64_t *cnt, int64_t sz) {
-    vole->extend((AuthValue<FpPolicy> *)yz, sz);
+    vole->extend((MersennePolicy61::AuthValue *)yz, sz);
     *cnt = 0;
   }
 

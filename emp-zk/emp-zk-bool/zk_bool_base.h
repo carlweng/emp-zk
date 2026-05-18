@@ -3,7 +3,7 @@
 
 // emp-zk-bool's plug into the unified Backend* backend on emp-tool
 // main. Single-threaded; one BoolIO* drives both the gate-level bool
-// stream and FerretCOT's OT-extension data.
+// stream and Ferret's OT-extension data.
 //
 // Layout:
 //   - zk_bool_base.h     — ZKBoolBase: shared state + the AND-gate
@@ -34,7 +34,7 @@ public:
   static constexpr int64_t CHECK_SZ = 1024 * 1024;
 
   // ---- Shared state (formerly OSTriple + ZKBoolBase) -----------
-  block delta;          // FerretCOT global secret. Prover side just stores it.
+  block delta;          // Ferret global secret. Prover side just stores it.
   int64_t gid = 0;      // Number of AND gates issued.
   block pub_label[2];   // Labels for PUBLIC-input bits.
 
@@ -47,7 +47,7 @@ public:
   GaloisFieldPacking pack;
   BoolIO  *io  = nullptr;
   PRG prg;
-  FerretCOT  *ferret    = nullptr;
+  Ferret  *ferret    = nullptr;
   PolyProof  *polyproof = nullptr;
 
   // Output-MAC accumulator. Hash + scratch buffer; finalize at teardown.
@@ -107,12 +107,12 @@ public:
 
   ZKBoolBase(int p, BoolIO *io_) : Backend(p), io(io_) {
     // BoolIO inherits IOChannel publicly with the IOChannel subobject at
-    // offset 0, so the cast is a no-op at runtime. FerretCOT now takes a
+    // offset 0, so the cast is a no-op at runtime. Ferret now takes a
     // single IOChannel (post-unification with the other OT extensions).
     IOChannel *iochan = reinterpret_cast<IOChannel *>(io_);
-    ferret = new FerretCOT(3 - p, iochan, /*malicious=*/true);
+    ferret = new Ferret(3 - p, iochan, /*malicious=*/true);
     ferret_is_sender = (p == BOB);   // ferret_party = 3-p; sender ⇔ ferret_party == ALICE
-    delta = ferret->Delta;           // Δ sampled in FerretCOT's ctor; bootstrap fires lazily on first rcot_*_begin
+    delta = ferret->Delta;           // Δ sampled in Ferret's ctor; bootstrap fires lazily on first rcot_*_begin
 
     andgate_out_buffer.resize(CHECK_SZ);
     andgate_left_buffer.resize(CHECK_SZ);

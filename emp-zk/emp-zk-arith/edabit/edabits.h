@@ -20,7 +20,7 @@ public:
   __uint128_t delta_fp;
   std::vector<__uint128_t> arith_candidate;
 
-  SVole<FpPolicy, IO> *cot_fp = nullptr;
+  FpVOLE<MersennePolicy61, IO> *cot_fp = nullptr;
 
   DoubAuthHelper<IO> *auth_helper = nullptr;
 
@@ -36,7 +36,7 @@ public:
 
   Integer int_boo_pr, int_boo_zero, int_boo_pr_plus_two;
 
-  EdaBits(int party, int threads, IO **ios, SVole<FpPolicy, IO> *cot_fp) {
+  EdaBits(int party, int threads, IO **ios, FpVOLE<MersennePolicy61, IO> *cot_fp) {
     this->party = party;
     this->ios = ios;
     this->cot_fp = cot_fp;
@@ -51,7 +51,7 @@ public:
     this->rand_pt = 0;
     this->edabit_num = 0;
     arith_candidate.resize(cot_fp->ot_limit);
-    cot_fp->extend((AuthValue<FpPolicy> *)arith_candidate.data(), cot_fp->ot_limit);
+    cot_fp->extend((MersennePolicy61::AuthValue *)arith_candidate.data(), cot_fp->ot_limit);
 
     this->ell = B * N + C; // batch size
     this->ell_faulty = ell - N;
@@ -81,7 +81,7 @@ public:
     // auto start = clock_start();
     //  If the buffer is used up, refill the Fp shares
     if (np_pt + ell > np_sz) {
-      cot_fp->extend((AuthValue<FpPolicy> *)arith_candidate.data(), cot_fp->ot_limit);
+      cot_fp->extend((MersennePolicy61::AuthValue *)arith_candidate.data(), cot_fp->ot_limit);
       np_pt = 0;
     }
     np_rg = np_pt + ell;

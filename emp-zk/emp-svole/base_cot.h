@@ -3,8 +3,8 @@
 
 // Bootstrap COT used by SVoleF2k / VoleTriple. The class started life
 // at emp-ot/ferret/base_cot.h on the v0.3.x emp-ot line, where it sat
-// next to FerretCOT as the IKNP-bootstrapped seed-OT layer. emp-ot
-// main folded that bootstrap into FerretCOT's own ctor and dropped
+// next to Ferret as the IKNP-bootstrapped seed-OT layer. emp-ot
+// main folded that bootstrap into Ferret's own ctor and dropped
 // the standalone class, but emp-zk's vole / vole-f2k still need a
 // separate cot_gen handle. Carrying a port locally is the smallest
 // change against the new line.

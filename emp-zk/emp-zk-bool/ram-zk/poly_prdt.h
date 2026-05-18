@@ -14,10 +14,10 @@ public:
   std::vector<block> buffer2;
   std::vector<block> buffer3;
   std::vector<block> buffer4;
-  FerretCOT *ferret = nullptr;
+  Ferret *ferret = nullptr;
   int64_t num;
 
-  RamPolyPrdt(int party, IO *io, FerretCOT *ferret)
+  RamPolyPrdt(int party, IO *io, Ferret *ferret)
       : party(party), io(io), ferret(ferret) {
     if (party == ALICE) {
       buffer0.resize(buffer_sz);

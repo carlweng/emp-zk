@@ -24,13 +24,13 @@ void test_vole_triple(NetIO *ios[threads + 1], int party) {
     Delta = mod(Delta, pr);
   }
   auto start = clock_start();
-  SVole<FpPolicy, NetIO> vtriple(party, ios[0], nullptr, (uint64_t)Delta);
+  FpVOLE<MersennePolicy61, NetIO> vtriple(party, ios[0], nullptr, (uint64_t)Delta);
   std::cout << "setup " << time_from(start) / 1000 << " ms" << std::endl;
 
   int triple_need = vtriple.ot_limit;
   start = clock_start();
   __uint128_t *buf = new __uint128_t[triple_need];
-  vtriple.extend((AuthValue<FpPolicy> *)buf, triple_need);
+  vtriple.extend((MersennePolicy61::AuthValue *)buf, triple_need);
   std::cout << triple_need << "\t" << time_from(start) / 1000 << " ms"
             << std::endl;
   vtriple.check_triple(party == ALICE ? Delta : 0, buf, triple_need);

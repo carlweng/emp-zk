@@ -48,11 +48,11 @@ void test_vole_triple(
   NetIO **ios,
   BoolIO **ios_bool,
   int party) {
-  FerretCOT ferretcot(
+  Ferret ferretcot(
     3 - party, reinterpret_cast<IOChannel *>(ios_bool[0]), /*malicious=*/true);
-  // FerretCOT ctor samples Δ; bootstrap fires lazily on first rcot_*_begin.
+  // Ferret ctor samples Δ; bootstrap fires lazily on first rcot_*_begin.
 
-  // SVole<F2kPolicy>::Bootstrap pulls from the streaming ferret session
+  // F2kVOLE's Bootstrap pulls from the streaming ferret session
   // via rcot_*_next; open it explicitly here (in the bool backend this
   // is implicit ctor->dtor). ferret was built with party=3-party, so
   // ferret is the OT-sender when this test side is BOB.
@@ -62,22 +62,22 @@ void test_vole_triple(
 
   block Delta = ferretcot.Delta;
   auto start = clock_start();
-  SVole<F2kPolicy, BoolIO> vtriple(party, ios_bool[0], &ferretcot,
+  F2kVOLE<F2kDefaultPolicy, BoolIO> vtriple(party, ios_bool[0], &ferretcot,
                                    party == BOB ? Delta : zero_block);
   std::cout << "setup " << time_from(start) / 1000 << " ms" << std::endl;
 
-  // Post-setup sanity check on the carry-over pre_auth.
+  // Post-setup sanity check on the carry-over pre_x / pre_yz.
   {
     std::vector<block> px(vtriple.param.n_pre), py(vtriple.param.n_pre);
     for (int64_t i = 0; i < vtriple.param.n_pre; ++i) {
-      px[i] = vtriple.pre_auth[i].val;
-      py[i] = vtriple.pre_auth[i].mac;
+      if (party == ALICE) px[i] = vtriple.pre_x[i];
+      py[i] = vtriple.pre_yz[i];
     }
     check_triple(Delta, px.data(), py.data(), vtriple.param.n_pre, ios[0]);
   }
 
   std::size_t triple_need = vtriple.ot_limit;
-  std::vector<AuthValue<F2kPolicy>> buf(triple_need);
+  std::vector<F2kDefaultPolicy::AuthValue> buf(triple_need);
   std::vector<block> buf_x(triple_need), buf_yz(triple_need);
   for(int i = 0; i < 16; ++i) {
     start = clock_start();

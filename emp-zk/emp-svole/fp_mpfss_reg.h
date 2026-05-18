@@ -70,14 +70,6 @@ public:
     }
   }
 
-  // AuthValue<FpPolicy>* aliases __uint128_t* (mac-first layout); the
-  // typed public API forwards to the existing __uint128_t-based code.
-  void mpfss(OTPre<IO> *ot, AuthValue<FpPolicy> *triple_yz_auth,
-             AuthValue<FpPolicy> *sparse_vector_auth) {
-    this->triple_yz = (__uint128_t *)triple_yz_auth;
-    mpfss(ot, (__uint128_t *)sparse_vector_auth);
-  }
-
   void mpfss(OTPre<IO> *ot, __uint128_t *triple_yz,
              __uint128_t *sparse_vector) {
     this->triple_yz = triple_yz;

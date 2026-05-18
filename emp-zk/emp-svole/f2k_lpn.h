@@ -1,32 +1,31 @@
-#ifndef EMP_SVOLE_LPN_AMP_H__
-#define EMP_SVOLE_LPN_AMP_H__
+#ifndef EMP_SVOLE_F2K_LPN_H__
+#define EMP_SVOLE_F2K_LPN_H__
 
-#include "emp-zk/emp-svole/field_policy.h"
 #include "emp-tool/emp-tool.h"
 #include <algorithm>
+#include <functional>
 
-// LPN linear-code amplifier over AuthValue<P>[]. Each output i
-// accumulates `d` random pre[idx_j] entries via P::k_add / P::f_add.
-// Sender (ALICE) folds both .val and .mac; receiver (BOB) only .mac.
-// PRP-seeded index sampling identical to the original char-2 path.
+// F2k LPN linear-code amplifier. SoA: separate K[] (val) and F[] (mac)
+// arrays. Each output i accumulates `d` random pre[idx_j] entries via
+// P::k_add (val) / P::f_add (mac). Sender (ALICE) folds both; receiver
+// (BOB) folds only mac.
 
 namespace emp {
 
-template <typename P, int d = 10> class LpnAmplifier {
+template <typename P, int d = 10> class F2kLpnAmp {
 public:
   using F = typename P::F;
   using K = typename P::K;
-  using AV = AuthValue<P>;
 
   int party;
   int64_t k, n;
   block seed;
   uint32_t k_mask;
 
-  AV *out_buf = nullptr;
-  const AV *pre_buf = nullptr;
+  K *Val = nullptr, *preV = nullptr;       // preV: const, but legacy code passes non-const
+  F *Mac = nullptr, *preM = nullptr;
 
-  LpnAmplifier(int64_t n, int64_t k, block seed = zero_block)
+  F2kLpnAmp(int64_t n, int64_t k, block seed = zero_block)
       : k(k), n(n), seed(seed) {
     k_mask = 1;
     while (k_mask < (uint32_t)k) {
@@ -38,15 +37,15 @@ public:
   // ALICE: fold val + mac.
   void add2(int64_t idx1, uint32_t *idx2) {
     for (int j = 0; j < d; ++j) {
-      out_buf[idx1].val = P::k_add(out_buf[idx1].val, pre_buf[idx2[j]].val);
-      out_buf[idx1].mac = P::f_add(out_buf[idx1].mac, pre_buf[idx2[j]].mac);
+      Val[idx1] = P::k_add(Val[idx1], preV[idx2[j]]);
+      Mac[idx1] = P::f_add(Mac[idx1], preM[idx2[j]]);
     }
   }
 
   // BOB: fold only mac.
   void add1(int64_t idx1, uint32_t *idx2) {
     for (int j = 0; j < d; ++j) {
-      out_buf[idx1].mac = P::f_add(out_buf[idx1].mac, pre_buf[idx2[j]].mac);
+      Mac[idx1] = P::f_add(Mac[idx1], preM[idx2[j]]);
     }
   }
 
@@ -85,7 +84,7 @@ public:
     int64_t j = 0;
     if (party == ALICE) {
       std::function<void(int64_t, uint32_t *)> add_func1 = std::bind(
-          &LpnAmplifier::add2, this, std::placeholders::_1,
+          &F2kLpnAmp::add2, this, std::placeholders::_1,
           std::placeholders::_2);
       for (; j < n - 4; j += 4)
         __compute4(j, &prp, add_func1);
@@ -93,7 +92,7 @@ public:
         __compute1(j, &prp, add_func1);
     } else {
       std::function<void(int64_t, uint32_t *)> add_func2 = std::bind(
-          &LpnAmplifier::add1, this, std::placeholders::_1,
+          &F2kLpnAmp::add1, this, std::placeholders::_1,
           std::placeholders::_2);
       for (; j < n - 4; j += 4)
         __compute4(j, &prp, add_func2);
@@ -102,17 +101,19 @@ public:
     }
   }
 
-  void compute_send(const AV *pre, AV *out) {
+  void compute_send(K *preV_in, K *V, F *preM_in, F *M) {
     this->party = ALICE;
-    this->pre_buf = pre;
-    this->out_buf = out;
+    this->preV = preV_in;
+    this->Val = V;
+    this->preM = preM_in;
+    this->Mac = M;
     compute();
   }
 
-  void compute_recv(const AV *pre, AV *out) {
+  void compute_recv(F *preM_in, F *M) {
     this->party = BOB;
-    this->pre_buf = pre;
-    this->out_buf = out;
+    this->preM = preM_in;
+    this->Mac = M;
     compute();
   }
 };

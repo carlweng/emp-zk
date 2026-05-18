@@ -22,7 +22,7 @@ public:
   std::vector<block> buffer1; // ALICE: A1 (Δ¹ coeff); BOB: unused
   int64_t num;
   GaloisFieldPacking pack;
-  FerretCOT *ferret = nullptr;
+  Ferret *ferret = nullptr;
   // Scratch for one rcot_*_next chunk; allocated lazily on first
   // batch_check. We pull a full chunk (~8K OTs) per call and use only
   // the first 128 — batch_check fires once per buffer_sz polys so the
@@ -30,7 +30,7 @@ public:
   // that owns this PolyProof; we just call rcot_*_next on it.
   std::vector<block> ope_buf;
 
-  PolyProof(int party, IOChannel *io, FerretCOT *ferret)
+  PolyProof(int party, IOChannel *io, Ferret *ferret)
       : party(party), io(io), delta(ferret->Delta), ferret(ferret), num(0) {
     buffer.resize(buffer_sz);
     if (party == ALICE)

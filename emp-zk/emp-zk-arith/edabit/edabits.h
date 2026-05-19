@@ -57,7 +57,7 @@ public:
     this->rand_pt = 0;
     this->edabit_num = 0;
     arith_candidate.resize(cot_fp->chunk_aligned_buf_sz());
-    cot_fp->extend((AuthValueFp *)arith_candidate.data(), cot_fp->chunk_aligned_buf_sz());
+    cot_fp->run((AuthValueFp *)arith_candidate.data(), cot_fp->chunk_aligned_buf_sz());
 
     this->ell = B * N + C; // batch size
     this->ell_faulty = ell - N;
@@ -87,7 +87,7 @@ public:
     // auto start = clock_start();
     //  If the buffer is used up, refill the Fp shares
     if (np_pt + ell > np_sz) {
-      cot_fp->extend((AuthValueFp *)arith_candidate.data(), cot_fp->chunk_aligned_buf_sz());
+      cot_fp->run((AuthValueFp *)arith_candidate.data(), cot_fp->chunk_aligned_buf_sz());
       np_pt = 0;
     }
     np_rg = np_pt + ell;

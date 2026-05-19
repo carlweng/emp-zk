@@ -54,50 +54,6 @@ public:
   Hash auth_hash;
   vector<block> auth_tmp;
 
-  // Backend-owned RCOT buffer fed by the streaming API. The backend
-  // holds one long-lived ferret session open from ctor to dtor;
-  // take_rcot drains rcot_buf and refills via rcot_*_next when empty.
-  // Other consumers that share `ferret` (PolyProof / RamOSTriple /
-  // BaseSVoleF2k) call rcot_*_next directly with their own scratch.
-  //
-  // Refill granularity: each refill calls rcot_*_next K times in a
-  // row, filling K * chunk_ots() OTs (1 chunk = 1 cGGM tree). Larger
-  // K cuts the take_rcot dispatch frequency by K but proportionally
-  // grows the buffer: at b13, K=512 → ~67 MiB. NetIO already
-  // auto-batches the per-tree corrections in its 32 KiB send buffer,
-  // so K mostly affects local dispatch, not wire traffic.
-  static constexpr int64_t kRcotRefillK = 1 << 9;
-  std::vector<block> rcot_buf;
-  int64_t rcot_pos = 0, rcot_avail = 0;
-
-  void take_rcot(block *out, int64_t n) {
-    while (n > 0) {
-      if (rcot_avail == 0) {
-        const int64_t chunk = ferret->chunk_ots();
-        const int64_t want = chunk * kRcotRefillK;
-        if ((int64_t)rcot_buf.size() < want) rcot_buf.resize(want);
-        for (int64_t k = 0; k < kRcotRefillK; ++k) {
-          block *slot = rcot_buf.data() + k * chunk;
-          ferret->rcot_next(slot);
-        }
-        // Eager flush: push any OT-extension bytes still in NetIO's
-        // send_buf out to the wire so the receiver doesn't stall
-        // waiting for a future refill or run_end. No-op on the recv
-        // side (BoolIO::flush() with ptr==NETWORK_STAGING_BUFFER_SIZE + no
-        // pending sends).
-        io->flush();
-        rcot_pos = 0;
-        rcot_avail = want;
-      }
-      int64_t take = std::min(n, rcot_avail);
-      std::memcpy(out, rcot_buf.data() + rcot_pos, take * sizeof(block));
-      rcot_pos += take;
-      rcot_avail -= take;
-      out += take;
-      n -= take;
-    }
-  }
-
   // ---- Lifecycle ------------------------------------------------------
 
   ZKBoolBase(int p, BoolIO *io_) : Backend(p), io(io_) {
@@ -106,20 +62,11 @@ public:
     // single IOChannel (post-unification with the other OT extensions).
     IOChannel *iochan = reinterpret_cast<IOChannel *>(io_);
     ferret = new Ferret(3 - p, iochan, /*malicious=*/true);
-    delta = ferret->Delta;           // Δ sampled in Ferret's ctor; bootstrap fires lazily on first rcot_begin
+    delta = ferret->Delta;           // Δ sampled in Ferret's ctor; bootstrap fires lazily on first rcot call
 
     andgate_out_buffer.resize(CHECK_SZ);
     andgate_left_buffer.resize(CHECK_SZ);
     andgate_right_buffer.resize(CHECK_SZ);
-
-    // Open the long-lived ferret RCOT session (ctor → dtor scope).
-    // take_rcot and any other consumer (PolyProof, RamOSTriple,
-    // BaseSVoleF2k) drain from this single session via rcot_next.
-    ferret->rcot_begin();
-
-    // Burn one COT to align rcot internal state with the protocol.
-    block tmp;
-    take_rcot(&tmp, 1);
 
     // Public-input label table — known to both parties by design.
     // PRP(1) key, distinct from ZKFpExec's PRP(0), so the two public
@@ -136,9 +83,7 @@ public:
   }
 
   ~ZKBoolBase() override {
-    // ~PolyProof runs batch_check, which still needs the open session.
     delete polyproof;
-    ferret->rcot_end();
     delete ferret;
   }
 

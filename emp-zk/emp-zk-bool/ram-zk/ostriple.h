@@ -31,10 +31,6 @@ public:
   Ferret *ferret = nullptr;
   F2kVOLE<AuthValueF2k, IO> *svole = nullptr;
   RamPolyPrdt<IO> *polyprdt = nullptr;
-  // One chunk of scratch for ferret->rcot_*_next; allocated lazily in
-  // andgate_correctness_check_manage. The bool backend opens the
-  // long-lived ferret session, so rcot_*_next is callable here.
-  std::vector<block> ope_buf;
 
   int64_t BUFFER_SZ = -1;
 
@@ -75,7 +71,7 @@ public:
   void sync() { io->flush(); }
 
   void pre_f2k_buffer_refill() {
-    svole->extend(auth_buffer.data(), BUFFER_SZ);
+    svole->run(auth_buffer.data(), BUFFER_SZ);
     authf2k_cnt = 0;
   }
 
@@ -162,7 +158,6 @@ public:
   using Base::ferret;
   using Base::pack;
   using Base::polyprdt;
-  using Base::ope_buf;
   using Base::auth_buffer;
   using Base::andgate_buffer_left_val;
   using Base::andgate_buffer_left_mac;
@@ -224,9 +219,8 @@ public:
     block sum[2] = { zero_block, zero_block };
     andgate_correctness_check_alice(sum, check_cnt, seed);
 
-    if (ope_buf.empty()) ope_buf.resize(ferret->chunk_ots());
-    ferret->rcot_next(ope_buf.data());
-    block *ope_data = ope_buf.data();
+    block ope_data[128];
+    ferret->rcot(ope_data, 128);
     uint64_t ch_bits[2];
     for (int i = 0; i < 2; ++i) {
       ch_bits[i] = getLSB(ope_data[64 * i + 63]) ? 1 : 0;
@@ -285,7 +279,6 @@ public:
   using Base::ferret;
   using Base::pack;
   using Base::polyprdt;
-  using Base::ope_buf;
   using Base::auth_buffer;
   using Base::andgate_buffer_left_val;
   using Base::andgate_buffer_left_mac;
@@ -347,9 +340,8 @@ public:
     block sum[2] = { zero_block, zero_block };
     andgate_correctness_check_bob(sum, check_cnt, seed);
 
-    if (ope_buf.empty()) ope_buf.resize(ferret->chunk_ots());
-    ferret->rcot_next(ope_buf.data());
-    block *ope_data = ope_buf.data();
+    block ope_data[128];
+    ferret->rcot(ope_data, 128);
     block B_star;
     pack.packing(&B_star, ope_data);
     B_star = B_star ^ sum[0];

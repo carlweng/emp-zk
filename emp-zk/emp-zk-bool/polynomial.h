@@ -23,12 +23,6 @@ public:
   int64_t num;
   GaloisFieldPacking pack;
   Ferret *ferret = nullptr;
-  // Scratch for one rcot_*_next chunk; allocated lazily on first
-  // batch_check. We pull a full chunk (~8K OTs) per call and use only
-  // the first 128 — batch_check fires once per buffer_sz polys so the
-  // surplus is amortized. The session is opened by the bool backend
-  // that owns this PolyProof; we just call rcot_*_next on it.
-  std::vector<block> ope_buf;
 
   PolyProof(int party, IOChannel *io, Ferret *ferret)
       : party(party), io(io), delta(ferret->Delta), ferret(ferret), num(0) {
@@ -45,7 +39,7 @@ public:
 
     block seed;
     std::vector<block> chi(num > 4 ? num : 4);
-    if (ope_buf.empty()) ope_buf.resize(ferret->chunk_ots());
+    block ope_data[128];
     block check_sum[2];
     if (party == ALICE) {
       io->recv_data(&seed, sizeof(block));
@@ -54,8 +48,7 @@ public:
 
       vector_inn_prdt_sum_red(check_sum, chi.data(), buffer.data(), num);
       vector_inn_prdt_sum_red(check_sum + 1, chi.data(), buffer1.data(), num);
-      ferret->rcot_next(ope_buf.data());
-      block *ope_data = ope_buf.data();
+      ferret->rcot(ope_data, 128);
       block tmp;
       pack.packing(&tmp, ope_data);
       uint64_t choice_bits[2];
@@ -81,8 +74,7 @@ public:
       uni_hash_coeff_gen(chi.data(), seed, num > 4 ? num : 4);
       block B;
       vector_inn_prdt_sum_red(&B, chi.data(), buffer.data(), num);
-      ferret->rcot_next(ope_buf.data());
-      block *ope_data = ope_buf.data();
+      ferret->rcot(ope_data, 128);
       block tmp;
       pack.packing(&tmp, ope_data);
 

@@ -5,7 +5,6 @@ Testing/
 .exrc
 build/
 build-*/
-data/*
 *perf.data*
 CMakeCache.txt
 CMakeFiles/

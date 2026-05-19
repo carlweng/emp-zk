@@ -1,6 +1,8 @@
 #ifndef D_AUTH_HELPER_H__
 #define D_AUTH_HELPER_H__
 
+#include <bitset>
+
 #include "emp-tool/emp-tool.h"
 
 using namespace emp;

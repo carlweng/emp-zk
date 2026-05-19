@@ -2,6 +2,7 @@
 #define EDABITS_H__
 
 #include <algorithm>
+#include <bitset>
 
 #include "emp-ot/emp-ot.h"
 #include "emp-tool/emp-tool.h"

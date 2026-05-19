@@ -6,65 +6,66 @@ using namespace std;
 
 int party, port;
 
-void check_triple(NetIO *io, __uint128_t *x, __uint128_t *y, int size) {
+using AV = MersennePolicy61::AuthValue;
+
+void check_triple(NetIO *io, uint64_t delta, AV *pairs, int size) {
   if (party == ALICE) {
-    io->send_data(x, sizeof(__uint128_t));
-    io->send_data(y, size * sizeof(__uint128_t));
+    io->send_data(&delta, sizeof(uint64_t));
+    std::vector<uint64_t> macs(size);
+    for (int i = 0; i < size; ++i) macs[i] = pairs[i].mac;
+    io->send_data(macs.data(), size * sizeof(uint64_t));
   } else {
-    __uint128_t delta;
-    __uint128_t *k = new __uint128_t[size];
-    io->recv_data(&delta, sizeof(__uint128_t));
-    io->recv_data(k, size * sizeof(__uint128_t));
+    uint64_t delta_recv;
+    std::vector<uint64_t> mac_alice(size);
+    io->recv_data(&delta_recv, sizeof(uint64_t));
+    io->recv_data(mac_alice.data(), size * sizeof(uint64_t));
     for (int i = 0; i < size; ++i) {
-      __uint128_t tmp = mod(delta * (y[i] >> 64), pr);
-      tmp = mod(tmp + k[i], pr);
-      if (tmp != (y[i] & 0xFFFFFFFFFFFFFFFFLL)) {
-        std::cout << "LPN error" << std::endl;
+      uint64_t tmp = mult_mod(delta_recv, pairs[i].val);
+      tmp = add_mod(tmp, mac_alice[i]);
+      if (tmp != pairs[i].mac) {
+        std::cout << "LPN error at " << i << std::endl;
         abort();
       }
     }
   }
 }
+
 void test_lpn(NetIO *io, int party) {
   Base_svole<NetIO> *svole;
 
-  // ALICE generate delta
   PRG prg;
-  __uint128_t Delta;
-  prg.random_data(&Delta, sizeof(__uint128_t));
-  Delta = Delta & ((__uint128_t)0xFFFFFFFFFFFFFFFFLL);
-  Delta = mod(Delta, pr);
+  uint64_t Delta;
+  prg.random_data(&Delta, sizeof(uint64_t));
+  Delta = mod(Delta);
+  if (Delta == 0) Delta = 1;
 
-  // test cases reduced for github action
+  // test sizes reduced for github action
   int test_n = 1016832 / 2;
-  int test_k = 158000 / 10;
-  __uint128_t *mac1 = new __uint128_t[test_n];
-  __uint128_t *mac2 = new __uint128_t[test_k];
+  int test_k = 1 << 17;   // power-of-2 for the unified Lpn
+  AV *out  = new AV[test_n];
+  AV *pre  = new AV[test_k];
 
   if (party == ALICE) {
-    svole = new Base_svole<NetIO>(party, io, Delta);
-    svole->triple_gen_send(mac1, test_n);
-    svole->triple_gen_send(mac2, test_k);
+    svole = new Base_svole<NetIO>(party, io, (__uint128_t)Delta);
+    svole->triple_gen_send(out, test_n);
+    svole->triple_gen_send(pre, test_k);
   } else {
     svole = new Base_svole<NetIO>(party, io);
-    svole->triple_gen_recv(mac1, test_n);
-    svole->triple_gen_recv(mac2, test_k);
+    svole->triple_gen_recv(out, test_n);
+    svole->triple_gen_recv(pre, test_k);
   }
 
-  LpnFp<10> lpn(test_n, test_k);
+  Lpn<MersennePolicy61, 10> lpn(test_k);
+  lpn.reseed(zero_block);
   auto start = clock_start();
-  if (party == ALICE) {
-    lpn.compute_send(mac1, mac2);
-    check_triple(io, &Delta, mac1, test_n);
-  } else {
-    lpn.compute_recv(mac1, mac2);
-    check_triple(io, nullptr, mac1, test_n);
-  }
+  lpn.compute_slice(out, pre, test_n);
+  check_triple(io, Delta, out, test_n);
   std::cout << "LPN: " << time_from(start) * 1000.0 / test_n << " ns per entry"
             << std::endl;
 
-  delete[] mac1;
-  delete[] mac2;
+  delete[] out;
+  delete[] pre;
+  delete svole;
 }
 
 int main(int argc, char **argv) {
@@ -74,7 +75,6 @@ int main(int argc, char **argv) {
   std::cout << std::endl
             << "------------ LPN ------------" << std::endl
             << std::endl;
-  ;
 
   test_lpn(io, party);
 

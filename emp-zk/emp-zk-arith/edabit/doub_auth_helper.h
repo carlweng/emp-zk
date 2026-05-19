@@ -6,6 +6,10 @@
 using namespace emp;
 using Integer = SignedInt;
 
+// AuthValue accessors (val-first layout: val in low 64, mac in high 64).
+#define VAL(x) _mm_extract_epi64((block)x, 0)
+#define MAC(x) _mm_extract_epi64((block)x, 1)
+
 template <typename IO> class DoubAuthHelper {
 public:
   int party;
@@ -29,8 +33,8 @@ public:
   void open_check_send(uint64_t *val, __uint128_t *dat_fp, int64_t len) {
     std::vector<uint64_t> mac(len);
     for (int64_t i = 0; i < len; ++i) {
-      val[i] = _mm_extract_epi64((block)dat_fp[i], 1);
-      mac[i] = _mm_extract_epi64((block)dat_fp[i], 0);
+      val[i] = VAL(dat_fp[i]);
+      mac[i] = MAC(dat_fp[i]);
     }
     hash.put(mac.data(), len * sizeof(uint64_t));
     io->send_data(val, len * sizeof(uint64_t));
@@ -41,7 +45,7 @@ public:
     std::vector<uint64_t> mac(len);
     for (int64_t i = 0; i < len; ++i) {
       mac[i] = mult_mod(val[i], (uint64_t)delta_fp);
-      mac[i] = add_mod((uint64_t)dat_fp[i], mac[i]);
+      mac[i] = add_mod(MAC(dat_fp[i]), mac[i]);
     }
     hash.put(mac.data(), len * sizeof(uint64_t));
   }
@@ -66,8 +70,8 @@ public:
   void open_check_send(Integer *dat_f2, __uint128_t *dat_fp, int64_t len) {
     std::vector<uint64_t> val(len);
     for (int64_t i = 0; i < len; ++i) {
-      val[i] = _mm_extract_epi64((block)dat_fp[i], 1);
-      uint64_t mac = _mm_extract_epi64((block)dat_fp[i], 0);
+      val[i] = VAL(dat_fp[i]);
+      uint64_t mac = MAC(dat_fp[i]);
       hash.put(&mac, sizeof(uint64_t));
     }
     io->send_data(val.data(), len * sizeof(uint64_t));
@@ -82,7 +86,7 @@ public:
     io->recv_data(val.data(), len * sizeof(uint64_t));
     for (int64_t i = 0; i < len; ++i) {
       uint64_t tmp = mult_mod(val[i], (uint64_t)delta_fp);
-      tmp = add_mod((uint64_t)dat_fp[i], tmp);
+      tmp = add_mod(MAC(dat_fp[i]), tmp);
       hash.put(&tmp, sizeof(uint64_t));
     }
     int bit_len = dat_f2[0].size();

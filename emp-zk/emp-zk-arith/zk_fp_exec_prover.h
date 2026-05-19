@@ -51,10 +51,11 @@ public:
   }
 
   __uint128_t add_gate(const __uint128_t &a, const __uint128_t &b) {
-    __uint128_t val = mod((a >> 64) + (b >> 64), pr);
-    __uint128_t mac =
+    // val-first layout: val in low 64, mac (K) in high 64.
+    __uint128_t val =
         mod((a & 0xFFFFFFFFFFFFFFFFULL) + (b & 0xFFFFFFFFFFFFFFFFULL), pr);
-    return (val << 64) ^ mac;
+    __uint128_t mac = mod((a >> 64) + (b >> 64), pr);
+    return (mac << 64) ^ val;
   }
 
   __uint128_t mul_gate(const __uint128_t &a, const __uint128_t &b) {
@@ -67,7 +68,8 @@ public:
   }
 
   __uint128_t pub_label(const uint64_t &a) {
-    return (__uint128_t)makeBlock(a, (uint64_t)this->pub_mac);
+    // val-first: val=a in low 64, mac=pub_mac in high 64.
+    return (__uint128_t)makeBlock((uint64_t)this->pub_mac, a);
   }
 };
 #endif

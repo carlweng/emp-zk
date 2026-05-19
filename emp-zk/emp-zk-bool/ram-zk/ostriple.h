@@ -1,7 +1,7 @@
 #ifndef EMP_ZK_RAM_OSTRIPLE_H__
 #define EMP_ZK_RAM_OSTRIPLE_H__
 
-#include "emp-zk/emp-svole/emp-svole.h"
+#include "emp-ot/svole/f2k_vole.h"
 #include "emp-zk/emp-zk-bool/ram-zk/poly_prdt.h"
 
 // =====================================================================
@@ -44,8 +44,8 @@ public:
       this->delta = ferret->Delta;
     else
       this->delta = zero_block;
-    svole = new F2kVOLE<F2kDefaultPolicy, IO>(party, io, ferret, delta);
-    BUFFER_SZ = svole->ot_limit;
+    svole = new F2kVOLE<F2kDefaultPolicy, IO>(party, io);
+    BUFFER_SZ = svole->chunk_aligned_buf_sz();
 
     auth_buffer.resize(BUFFER_SZ);
     andgate_buffer_left_val.resize(BUFFER_SZ);

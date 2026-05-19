@@ -4,8 +4,18 @@
 #include "emp-zk/emp-svole/emp-svole.h"
 #include "emp-zk/emp-zk-arith/triple_auth.h"
 
+// Bit-position helpers (layout-agnostic).
 #define LOW64(x) _mm_extract_epi64((block)x, 0)
 #define HIGH64(x) _mm_extract_epi64((block)x, 1)
+
+// AuthValue accessors (val-first layout: val in low 64, mac in high 64).
+// Use these for AuthValue casts so the layout intent is explicit; keep
+// LOW64/HIGH64 for raw block bit extraction (chi_seed, F_p deltas, etc.).
+#define VAL(x) _mm_extract_epi64((block)x, 0)
+#define MAC(x) _mm_extract_epi64((block)x, 1)
+// Construct an AuthValue-bytes __uint128_t from (val, mac).
+#define MAKE_AUTH(val_, mac_) \
+    ((__uint128_t)makeBlock((uint64_t)(mac_), (uint64_t)(val_)))
 
 template <typename IO> class FpOSTriple {
 public:
@@ -36,8 +46,8 @@ public:
     pool = new ThreadPool(threads);
 
     if (party == BOB) delta_gen();
-    vole = new FpVOLE<MersennePolicy61, IO>(3 - party, ios[0], nullptr,
-                                    party == BOB ? (uint64_t)delta : 0);
+    vole = new FpVOLE<MersennePolicy61, IO>(3 - party, ios[0]);
+    if (party == BOB) vole->set_delta((uint64_t)delta);
 
     andgate_out_buffer.resize(CHECK_SZ);
     andgate_left_buffer.resize(CHECK_SZ);
@@ -65,9 +75,9 @@ public:
     vole->extend((MersennePolicy61::AuthValue *)&mac, 1);
 
     uint64_t lam = PR - w;
-    lam = add_mod(HIGH64(mac), lam);
+    lam = add_mod(VAL(mac), lam);
     io->send_data(&lam, sizeof(uint64_t));
-    return (__uint128_t)makeBlock(w, LOW64(mac));
+    return MAKE_AUTH(w, MAC(mac));
   }
 
   void authenticated_val_input(__uint128_t *label, const uint64_t *w, int64_t len) {
@@ -76,8 +86,8 @@ public:
 
     for (int64_t i = 0; i < len; ++i) {
       lam[i] = PR - w[i];
-      lam[i] = add_mod(HIGH64(label[i]), lam[i]);
-      label[i] = (__uint128_t)makeBlock(w[i], LOW64(label[i]));
+      lam[i] = add_mod(VAL(label[i]), lam[i]);
+      label[i] = MAKE_AUTH(w[i], MAC(label[i]));
     }
     io->send_data(lam.data(), len * sizeof(uint64_t));
   }
@@ -89,10 +99,10 @@ public:
     uint64_t lam;
     io->recv_data(&lam, sizeof(uint64_t));
 
-    lam = mult_mod(lam, delta);
-    key = add_mod(key, lam);
-
-    return key;
+    uint64_t delta_lam = mult_mod(lam, (uint64_t)delta);
+    // BOB's key has val=0 in low, mac in high (val-first); only the mac
+    // side picks up the correction.
+    return MAKE_AUTH(0, add_mod(MAC(key), delta_lam));
   }
 
   void authenticated_val_input(__uint128_t *label, int64_t len) {
@@ -102,8 +112,8 @@ public:
     io->recv_data(lam.data(), len * sizeof(uint64_t));
 
     for (int64_t i = 0; i < len; ++i) {
-      lam[i] = mult_mod(lam[i], delta);
-      label[i] = add_mod(label[i], lam[i]);
+      uint64_t delta_lam = mult_mod(lam[i], (uint64_t)delta);
+      label[i] = MAKE_AUTH(0, add_mod(MAC(label[i]), delta_lam));
     }
   }
 
@@ -120,12 +130,12 @@ public:
     andgate_left_buffer[check_cnt] = Ma;
     andgate_right_buffer[check_cnt] = Mb;
 
-    uint64_t d = mult_mod(HIGH64(Ma), HIGH64(Mb));
+    uint64_t d = mult_mod(VAL(Ma), VAL(Mb));
     uint64_t s = PR - d;
-    s = add_mod(HIGH64(mac), s);
+    s = add_mod(VAL(mac), s);
     io->send_data(&s, sizeof(uint64_t));
 
-    mac = (__uint128_t)makeBlock(d, LOW64(mac));
+    mac = MAKE_AUTH(d, MAC(mac));
     andgate_out_buffer[check_cnt] = mac;
     check_cnt++;
 
@@ -144,8 +154,10 @@ public:
 
     uint64_t d;
     io->recv_data(&d, sizeof(uint64_t));
-    d = mult_mod(d, delta);
-    key = add_mod(key, d);
+    uint64_t delta_d = mult_mod(d, (uint64_t)delta);
+    // BOB's key: val=0 in low, mac in high (val-first); apply
+    // correction to the mac side only.
+    key = MAKE_AUTH(0, add_mod(MAC(key), delta_d));
 
     andgate_out_buffer[check_cnt] = key;
     check_cnt++;
@@ -211,8 +223,8 @@ public:
     if (party == ALICE) {
       __uint128_t ope_data;
       vole->extend((MersennePolicy61::AuthValue *)&ope_data, 1);
-      uint64_t A0_star = LOW64(ope_data);
-      uint64_t A1_star = HIGH64(ope_data);
+      uint64_t A0_star = MAC(ope_data);
+      uint64_t A1_star = VAL(ope_data);
       uint64_t check_sum[2];
       check_sum[0] = add_mod(U, A0_star);
       check_sum[1] = add_mod(V, A1_star);
@@ -220,7 +232,7 @@ public:
     } else {
       __uint128_t ope_data;
       vole->extend((MersennePolicy61::AuthValue *)&ope_data, 1);
-      uint64_t B_star = LOW64(ope_data);
+      uint64_t B_star = MAC(ope_data);
       W = add_mod(W, B_star);
       uint64_t check_sum[2];
       io->recv_data(check_sum, 2 * sizeof(uint64_t));
@@ -248,11 +260,11 @@ public:
       uint64_t U = 0, V = 0;
       uint64_t a, b, ma, mb, mc;
       for (uint32_t i = start, k = 0; i < start + task_n; ++i, ++k) {
-        a = HIGH64(left[i]);
-        ma = LOW64(left[i]);
-        b = HIGH64(right[i]);
-        mb = LOW64(right[i]);
-        mc = LOW64(gateout[i]);
+        a = VAL(left[i]);
+        ma = MAC(left[i]);
+        b = VAL(right[i]);
+        mb = MAC(right[i]);
+        mc = MAC(gateout[i]);
         A0 = mult_mod(ma, mb);
         A1 = add_mod(mult_mod(a, mb), mult_mod(b, ma));
         uint64_t tmp = PR - mc;
@@ -267,9 +279,9 @@ public:
       uint64_t W = 0;
       uint64_t ka, kb, kc;
       for (uint32_t i = start, k = 0; i < start + task_n; ++i, ++k) {
-        ka = LOW64(left[i]);
-        kb = LOW64(right[i]);
-        kc = LOW64(gateout[i]);
+        ka = MAC(left[i]);
+        kb = MAC(right[i]);
+        kc = MAC(gateout[i]);
         B = add_mod(mult_mod(ka, kb), mult_mod(kc, delta));
         W = add_mod(W, mult_mod(B, chi[k]));
       }
@@ -283,8 +295,8 @@ public:
    */
   void reveal_send(const __uint128_t *output, uint64_t *value, int64_t len) {
     for (int64_t i = 0; i < len; ++i) {
-      value[i] = HIGH64(output[i]);
-      uint64_t mac = LOW64(output[i]);
+      value[i] = VAL(output[i]);
+      uint64_t mac = MAC(output[i]);
       auth_helper->store(mac); // TODO
     }
     io->send_data(value, len * sizeof(uint64_t));
@@ -294,7 +306,7 @@ public:
     io->recv_data(value, len * sizeof(uint64_t));
     for (int64_t i = 0; i < len; ++i) {
       uint64_t mac = mult_mod(value[i], LOW64(delta));
-      mac = add_mod(mac, LOW64(output[i]));
+      mac = add_mod(mac, MAC(output[i]));
       auth_helper->store(mac); // TODO
     }
   }
@@ -315,7 +327,7 @@ public:
 
   void reveal_check_zero(const __uint128_t *output, int64_t len) {
     for (int64_t i = 0; i < len; ++i) {
-      uint64_t mac = LOW64(output[i]);
+      uint64_t mac = MAC(output[i]);
       auth_helper->store(mac);
     }
   }
@@ -355,9 +367,9 @@ public:
   void compute_mu_prv(__uint128_t &ret, __uint128_t z1, __uint128_t *triple,
                       __uint128_t epsilon, __uint128_t sigma) {
     __uint128_t tmp1 = auth_mac_subtract(triple[2], z1);
-    __uint128_t tmp2 = auth_mac_mul_const(triple[0], sigma >> 64);
-    __uint128_t tmp3 = auth_mac_mul_const(triple[1], epsilon >> 64);
-    __uint128_t tmp4 = mod((epsilon >> 64) * (sigma >> 64), pr);
+    __uint128_t tmp2 = auth_mac_mul_const(triple[0], VAL(sigma));
+    __uint128_t tmp3 = auth_mac_mul_const(triple[1], VAL(epsilon));
+    __uint128_t tmp4 = mult_mod(VAL(epsilon), VAL(sigma));
     tmp1 = auth_mac_add(tmp1, tmp2);
     tmp1 = auth_mac_add(tmp1, tmp3);
     ret = auth_mac_add_const(tmp1, tmp4);
@@ -376,9 +388,9 @@ public:
   __uint128_t compute_mu_prv_opt(__uint128_t la, __uint128_t lb,
                                  __uint128_t eta_wr, __uint128_t *triple) {
     __uint128_t tmp1 = auth_mac_subtract(triple[2], eta_wr);
-    __uint128_t tmp2 = auth_mac_mul_const(triple[0], HIGH64(lb));
-    __uint128_t tmp3 = auth_mac_mul_const(triple[1], HIGH64(la));
-    __uint128_t tmp4 = mult_mod(HIGH64(la), HIGH64(lb));
+    __uint128_t tmp2 = auth_mac_mul_const(triple[0], VAL(lb));
+    __uint128_t tmp3 = auth_mac_mul_const(triple[1], VAL(la));
+    __uint128_t tmp4 = mult_mod(VAL(la), VAL(lb));
     tmp1 = auth_mac_add(tmp1, tmp2);
     tmp1 = auth_mac_add(tmp1, tmp3);
     return auth_mac_add_const(tmp1, tmp4);
@@ -403,9 +415,9 @@ public:
   }
 
   // prover: add a IT-MAC with a constant
-  // return: [a] + c
+  // return: [a] + c (adds c into the val lane only; mac unchanged)
   __uint128_t auth_mac_add_const(__uint128_t a, __uint128_t c) {
-    block cc = makeBlock(c, 0);
+    block cc = makeBlock(0, c);   // (high=0=mac-delta, low=c=val-delta)
     cc = _mm_add_epi64((block)a, cc);
     return (__uint128_t)vec_mod(cc);
   }
@@ -424,31 +436,33 @@ public:
     return (__uint128_t)mult_mod((block)a, c);
   }
 
-  // verifier: add 2 IT-MACs
+  // verifier: add 2 IT-MACs (mac-only on BOB; val=0 throughout)
   // return: [a] + [b]
   __uint128_t auth_key_add(__uint128_t a, __uint128_t b) {
-    return add_mod(a, b);
+    return MAKE_AUTH(0, add_mod(MAC(a), MAC(b)));
   }
 
-  // verifier: add a IT-MACs with a constant
-  // return: [a] + [b]
+  // verifier: add an IT-MAC with a constant — subtract Δ·c from the mac
+  // (BOB's view of "adding c to the IT-MAC of value v" is to adjust
+  // his mac by -Δ·c so that K = mac' + Δ·(v+c) = original K).
   __uint128_t auth_key_add_const(__uint128_t a, __uint128_t c) {
-    __uint128_t tmp = mult_mod(c, delta);
-    tmp = pr - tmp;
-    return add_mod(a, tmp);
+    uint64_t delta_c = mult_mod((uint64_t)c, (uint64_t)delta);
+    uint64_t new_mac = add_mod(MAC(a), PR - delta_c);
+    return MAKE_AUTH(0, new_mac);
   }
 
   // verifier: subtract 2 Keys
   // return: [a] - [b]
   __uint128_t auth_key_subtract(__uint128_t a, __uint128_t b) {
-    __uint128_t key = pr - b;
-    return add_mod(key, a);
+    uint64_t new_mac = add_mod(MAC(a), PR - MAC(b));
+    return MAKE_AUTH(0, new_mac);
   }
 
-  // verifier: multiplies Key with a constant
-  // return: c*[a]
+  // verifier: multiplies Key (mac field) with a scalar constant c.
+  // BOB's val=0 stays 0; mac becomes mac · c.
   __uint128_t auth_key_mul_const(__uint128_t a, __uint128_t c) {
-    return mult_mod(a, c);
+    uint64_t new_mac = mult_mod(MAC(a), (uint64_t)c);
+    return MAKE_AUTH(0, new_mac);
   }
 
   uint64_t communication() {
@@ -467,9 +481,12 @@ public:
       std::vector<__uint128_t> auth_recv(len);
       io->recv_data(auth_recv.data(), len * sizeof(__uint128_t));
       for (int64_t i = 0; i < len; ++i) {
-        __uint128_t mac = mod((auth_recv[i] >> 64) * delta, pr);
-        mac = mod(mac + auth[i], pr);
-        if ((auth_recv[i] & (__uint128_t)0xFFFFFFFFFFFFFFFFLL) != mac) {
+        uint64_t val   = VAL(auth_recv[i]);
+        uint64_t mac_a = MAC(auth_recv[i]);
+        uint64_t mac_b = MAC(auth[i]);
+        uint64_t recomputed = mult_mod(val, (uint64_t)delta);
+        recomputed = add_mod(recomputed, mac_b);
+        if (mac_a != recomputed) {
           std::cout << "authenticated mac error at: " << i << std::endl;
           abort();
         }
@@ -489,12 +506,12 @@ public:
       io->recv_data(br.data(), len * sizeof(__uint128_t));
       io->recv_data(cr.data(), len * sizeof(__uint128_t));
       for (int64_t i = 0; i < len; ++i) {
-        __uint128_t product = mod((ar[i] >> 64) * (br[i] >> 64), pr);
-        if (product != (cr[i] >> 64))
+        uint64_t product = mult_mod(VAL(ar[i]), VAL(br[i]));
+        if (product != VAL(cr[i]))
           error("wrong product");
-        __uint128_t mac = mod(product * delta, pr);
-        mac = mod(mac + c[i], pr);
-        if (mac != (cr[i] & (__uint128_t)0xFFFFFFFFFFFFFFFFLL))
+        uint64_t recomputed = mult_mod(product, (uint64_t)delta);
+        recomputed = add_mod(recomputed, MAC(c[i]));
+        if (recomputed != MAC(cr[i]))
           error("wrong mac");
       }
     }

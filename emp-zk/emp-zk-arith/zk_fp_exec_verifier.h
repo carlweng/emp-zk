@@ -52,7 +52,11 @@ public:
   }
 
   __uint128_t add_gate(const __uint128_t &a, const __uint128_t &b) {
-    return mod(a + b, pr);
+    // val-first: BOB has val=0 in low, mac (K) in high. Sum the macs.
+    uint64_t mac_a = (uint64_t)(a >> 64);
+    uint64_t mac_b = (uint64_t)(b >> 64);
+    uint64_t mac = add_mod(mac_a, mac_b);
+    return ((__uint128_t)mac) << 64;
   }
 
   __uint128_t mul_gate(const __uint128_t &a, const __uint128_t &b) {
@@ -67,7 +71,9 @@ public:
   __uint128_t pub_label(const uint64_t &a) {
     uint64_t key = mult_mod(delta, a);
     key = PR - key;
-    return add_mod(key, (uint64_t)this->pub_mac);
+    uint64_t mac = add_mod(key, (uint64_t)this->pub_mac);
+    // val-first: mac in high 64, val=0 in low.
+    return ((__uint128_t)mac) << 64;
   }
 };
 #endif

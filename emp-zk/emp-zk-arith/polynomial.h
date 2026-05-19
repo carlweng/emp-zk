@@ -49,8 +49,8 @@ public:
       check_sum[1] = vector_inn_prdt_sum_red(chi.data(), buffer1.data(), num);
       ostriple->vole->extend((MersennePolicy61::AuthValue *)&ope_data, 1);
 
-      check_sum[0] = add_mod(check_sum[0], LOW64(ope_data));
-      check_sum[1] = add_mod(check_sum[1], HIGH64(ope_data));
+      check_sum[0] = add_mod(check_sum[0], MAC(ope_data));
+      check_sum[1] = add_mod(check_sum[1], VAL(ope_data));
       io->send_data(check_sum, 2 * sizeof(uint64_t));
     } else {
       PRG prg;
@@ -61,7 +61,7 @@ public:
       uni_hash_coeff_gen(chi.data(), seed, num);
       uint64_t B = vector_inn_prdt_sum_red(chi.data(), buffer.data(), num);
       ostriple->vole->extend((MersennePolicy61::AuthValue *)&ope_data, 1);
-      B = add_mod(B, LOW64(ope_data));
+      B = add_mod(B, MAC(ope_data));
       io->recv_data(check_sum, 2 * sizeof(uint64_t));
 
       uint64_t tmp = mult_mod(check_sum[1], delta);
@@ -81,10 +81,10 @@ public:
       uint64_t A0 = 0, A1 = 0;
       uint64_t w0, w1, m0, m1, tmp;
       for (int64_t i = 0; i < len; ++i) {
-        w0 = HIGH64(polyx[i]);
-        m0 = LOW64(polyx[i]);
-        w1 = HIGH64(polyy[i]);
-        m1 = LOW64(polyy[i]);
+        w0 = VAL(polyx[i]);
+        m0 = MAC(polyx[i]);
+        w1 = VAL(polyy[i]);
+        m1 = MAC(polyy[i]);
 
         tmp = mult_mod(m0, m1);
         tmp = mult_mod(coeff[i + 1], tmp);
@@ -100,7 +100,7 @@ public:
       uint64_t B = 0;
       uint64_t tmp;
       for (int64_t i = 0; i < len; ++i) {
-        tmp = mult_mod(LOW64(polyx[i]), LOW64(polyy[i]));
+        tmp = mult_mod(MAC(polyx[i]), MAC(polyy[i]));
         tmp = mult_mod(coeff[i + 1], tmp);
         B = add_mod(B, tmp);
       }
@@ -121,10 +121,10 @@ public:
       uint64_t A0 = 0, A1 = 0;
       uint64_t w0, w1, m0, m1, tmp;
       for (int64_t i = 0; i < len; ++i) {
-        w0 = HIGH64(polyx[i]);
-        m0 = LOW64(polyx[i]);
-        w1 = HIGH64(polyy[i]);
-        m1 = LOW64(polyy[i]);
+        w0 = VAL(polyx[i]);
+        m0 = MAC(polyx[i]);
+        w1 = VAL(polyy[i]);
+        m1 = MAC(polyy[i]);
 
         tmp = mult_mod(m0, m1);
         A0 = add_mod(A0, tmp);
@@ -138,7 +138,7 @@ public:
       uint64_t B = 0;
       uint64_t tmp;
       for (int64_t i = 0; i < len; ++i) {
-        tmp = mult_mod(LOW64(polyx[i]), LOW64(polyy[i]));
+        tmp = mult_mod(MAC(polyx[i]), MAC(polyy[i]));
         B = add_mod(B, tmp);
       }
       tmp = mult_mod(delta, delta);

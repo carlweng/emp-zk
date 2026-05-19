@@ -9,6 +9,12 @@
 #include "emp-zk/emp-svole/emp-svole.h"
 #include "emp-zk/emp-zk-bool/emp-zk-bool.h"
 
+// AuthValue accessors (val-first: val in low 64, mac in high 64).
+#define VAL(x) _mm_extract_epi64((block)x, 0)
+#define MAC(x) _mm_extract_epi64((block)x, 1)
+#define MAKE_AUTH(val_, mac_) \
+    ((__uint128_t)makeBlock((uint64_t)(mac_), (uint64_t)(val_)))
+
 template <typename IO> class EdaBits {
 public:
   static EdaBits<IO> *conv;
@@ -44,14 +50,14 @@ public:
       this->delta_fp = cot_fp->delta();
     }
 
-    this->np_sz = cot_fp->ot_limit;
+    this->np_sz = cot_fp->chunk_aligned_buf_sz();
     this->np_pt = 0;
     this->np_rg = 0;
     this->edabit_offset = 0;
     this->rand_pt = 0;
     this->edabit_num = 0;
-    arith_candidate.resize(cot_fp->ot_limit);
-    cot_fp->extend((MersennePolicy61::AuthValue *)arith_candidate.data(), cot_fp->ot_limit);
+    arith_candidate.resize(cot_fp->chunk_aligned_buf_sz());
+    cot_fp->extend((MersennePolicy61::AuthValue *)arith_candidate.data(), cot_fp->chunk_aligned_buf_sz());
 
     this->ell = B * N + C; // batch size
     this->ell_faulty = ell - N;
@@ -81,7 +87,7 @@ public:
     // auto start = clock_start();
     //  If the buffer is used up, refill the Fp shares
     if (np_pt + ell > np_sz) {
-      cot_fp->extend((MersennePolicy61::AuthValue *)arith_candidate.data(), cot_fp->ot_limit);
+      cot_fp->extend((MersennePolicy61::AuthValue *)arith_candidate.data(), cot_fp->chunk_aligned_buf_sz());
       np_pt = 0;
     }
     np_rg = np_pt + ell;
@@ -90,7 +96,7 @@ public:
     if (party == ALICE) {
       for (uint32_t i = 0; i < ell; ++i)
         bool_candidate[i] = Integer(
-            62, _mm_extract_epi64((block)arith_candidate[np_pt + i], 1), ALICE);
+            62, VAL(arith_candidate[np_pt + i]), ALICE);
     } else {
       for (uint32_t i = 0; i < ell; ++i)
         bool_candidate[i] = Integer(62, 0, ALICE);
@@ -274,29 +280,29 @@ public:
 
   __uint128_t intfp_add_const(__uint128_t a, uint64_t b) {
     if (party == ALICE) {
-      uint64_t high = _mm_extract_epi64((block)a, 1);
-      uint64_t low = _mm_extract_epi64((block)a, 0);
-      high = add_mod(high, b);
-      return (__uint128_t)makeBlock(high, low);
+      // ALICE has (val, mac). Adding constant b to val only.
+      uint64_t val = add_mod(VAL(a), b);
+      uint64_t mac = MAC(a);
+      return MAKE_AUTH(val, mac);
     } else {
-      uint64_t low = _mm_extract_epi64((block)a, 0);
-      b = mult_mod(b, (uint64_t)delta_fp);
-      b = PR - b;
-      return (__uint128_t)makeBlock(0x0LL, add_mod(low, b));
+      // BOB (Δ-holder): mac -= b · Δ; val stays 0.
+      uint64_t mb = mult_mod(b, (uint64_t)delta_fp);
+      mb = PR - mb;
+      uint64_t mac = add_mod(MAC(a), mb);
+      return MAKE_AUTH(0, mac);
     }
   }
 
   __uint128_t intfp_add(__uint128_t a, __uint128_t b) {
     if (party == ALICE) {
-      uint64_t high = add_mod(_mm_extract_epi64((block)a, 1),
-                              _mm_extract_epi64((block)b, 1));
-      uint64_t low = add_mod(_mm_extract_epi64((block)a, 0),
-                             _mm_extract_epi64((block)b, 0));
-      return (__uint128_t)makeBlock(high, low);
+      // Both halves add element-wise.
+      uint64_t val = add_mod(VAL(a), VAL(b));
+      uint64_t mac = add_mod(MAC(a), MAC(b));
+      return MAKE_AUTH(val, mac);
     } else {
-      return (__uint128_t)makeBlock(0x0LL,
-                                    add_mod(_mm_extract_epi64((block)a, 0),
-                                            _mm_extract_epi64((block)b, 0)));
+      // BOB: only macs combine; vals stay 0.
+      uint64_t mac = add_mod(MAC(a), MAC(b));
+      return MAKE_AUTH(0, mac);
     }
   }
 
@@ -332,7 +338,7 @@ public:
   }
 
   uint64_t sender_check_int_value(__uint128_t in) {
-    return _mm_extract_epi64((block)in, 1);
+    return VAL(in);
   }
 };
 template <typename IO> EdaBits<IO> *EdaBits<IO>::conv = nullptr;

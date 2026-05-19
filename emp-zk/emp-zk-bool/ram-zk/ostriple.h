@@ -45,6 +45,10 @@ public:
     else
       this->delta = zero_block;
     svole = new F2kVOLE<AuthValueF2k, IO>(party, io);
+    // Pin the svole's Δ to the shared Ferret's Δ; otherwise svole auths
+    // and zk_bool auths would live under different Δs, breaking the
+    // mac arithmetic in compute_mul / andgate batch checks.
+    if (party == BOB) svole->set_delta(ferret->Delta);
     BUFFER_SZ = svole->chunk_aligned_buf_sz();
 
     auth_buffer.resize(BUFFER_SZ);

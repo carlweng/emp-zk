@@ -54,7 +54,7 @@ public:
 
       vector_inn_prdt_sum_red(check_sum, chi.data(), buffer.data(), num);
       vector_inn_prdt_sum_red(check_sum + 1, chi.data(), buffer1.data(), num);
-      ferret->rcot_recv_next(ope_buf.data());
+      ferret->rcot_next(ope_buf.data());
       block *ope_data = ope_buf.data();
       block tmp;
       pack.packing(&tmp, ope_data);
@@ -81,7 +81,7 @@ public:
       uni_hash_coeff_gen(chi.data(), seed, num > 4 ? num : 4);
       block B;
       vector_inn_prdt_sum_red(&B, chi.data(), buffer.data(), num);
-      ferret->rcot_send_next(ope_buf.data());
+      ferret->rcot_next(ope_buf.data());
       block *ope_data = ope_buf.data();
       block tmp;
       pack.packing(&tmp, ope_data);

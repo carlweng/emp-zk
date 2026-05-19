@@ -7,7 +7,7 @@ using namespace std;
 
 int party, port;
 
-using AV = AuthValue<uint64_t, uint64_t>;
+using AV = AuthValueFp;
 
 void check_triple(NetIO *io, uint64_t delta, AV *pairs, int size) {
   if (party == ALICE) {
@@ -35,7 +35,7 @@ void test_base_svole(NetIO *io, int party) {
   int test_n = 1024;
   std::vector<AV> pairs(test_n);
 
-  Base_svole<NetIO> *svole;
+  Base_svole<AuthValueFp, NetIO> *svole;
 
   uint64_t Delta = 0;
   if (party == ALICE) {
@@ -43,9 +43,9 @@ void test_base_svole(NetIO *io, int party) {
     prg.random_data(&Delta, sizeof(uint64_t));
     Delta = mod(Delta);
     if (Delta == 0) Delta = 1;
-    svole = new Base_svole<NetIO>(party, io, (__uint128_t)Delta);
+    svole = new Base_svole<AuthValueFp, NetIO>(party, io, (__uint128_t)Delta);
   } else {
-    svole = new Base_svole<NetIO>(party, io);
+    svole = new Base_svole<AuthValueFp, NetIO>(party, io);
   }
 
   auto start = clock_start();

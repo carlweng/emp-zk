@@ -69,10 +69,6 @@ public:
   static constexpr int64_t kRcotRefillK = 1 << 9;
   std::vector<block> rcot_buf;
   int64_t rcot_pos = 0, rcot_avail = 0;
-  // ferret was constructed with party = (3 - p), so ferret_is_sender
-  // flips the prover/verifier party labels. Captured once at ctor to
-  // avoid threading the inversion into every dispatch site.
-  bool ferret_is_sender;
 
   void take_rcot(block *out, int64_t n) {
     while (n > 0) {
@@ -82,8 +78,7 @@ public:
         if ((int64_t)rcot_buf.size() < want) rcot_buf.resize(want);
         for (int64_t k = 0; k < kRcotRefillK; ++k) {
           block *slot = rcot_buf.data() + k * chunk;
-          if (ferret_is_sender) ferret->rcot_send_next(slot);
-          else                  ferret->rcot_recv_next(slot);
+          ferret->rcot_next(slot);
         }
         // Eager flush: push any OT-extension bytes still in NetIO's
         // send_buf out to the wire so the receiver doesn't stall
@@ -111,8 +106,7 @@ public:
     // single IOChannel (post-unification with the other OT extensions).
     IOChannel *iochan = reinterpret_cast<IOChannel *>(io_);
     ferret = new Ferret(3 - p, iochan, /*malicious=*/true);
-    ferret_is_sender = (p == BOB);   // ferret_party = 3-p; sender ⇔ ferret_party == ALICE
-    delta = ferret->Delta;           // Δ sampled in Ferret's ctor; bootstrap fires lazily on first rcot_*_begin
+    delta = ferret->Delta;           // Δ sampled in Ferret's ctor; bootstrap fires lazily on first rcot_begin
 
     andgate_out_buffer.resize(CHECK_SZ);
     andgate_left_buffer.resize(CHECK_SZ);
@@ -120,9 +114,8 @@ public:
 
     // Open the long-lived ferret RCOT session (ctor → dtor scope).
     // take_rcot and any other consumer (PolyProof, RamOSTriple,
-    // BaseSVoleF2k) drain from this single session via rcot_*_next.
-    if (ferret_is_sender) ferret->rcot_send_begin();
-    else                  ferret->rcot_recv_begin();
+    // BaseSVoleF2k) drain from this single session via rcot_next.
+    ferret->rcot_begin();
 
     // Burn one COT to align rcot internal state with the protocol.
     block tmp;
@@ -145,8 +138,7 @@ public:
   ~ZKBoolBase() override {
     // ~PolyProof runs batch_check, which still needs the open session.
     delete polyproof;
-    if (ferret_is_sender) ferret->rcot_send_end();
-    else                  ferret->rcot_recv_end();
+    ferret->rcot_end();
     delete ferret;
   }
 

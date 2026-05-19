@@ -18,7 +18,7 @@ public:
   block delta;
 
   int64_t authf2k_cnt = 0, check_cnt = 0;
-  std::vector<F2kDefaultPolicy::AuthValue> auth_buffer;
+  std::vector<AuthValueF2k> auth_buffer;
   std::vector<block> andgate_buffer_left_val;
   std::vector<block> andgate_buffer_left_mac;
   std::vector<block> andgate_buffer_rght_val;
@@ -29,7 +29,7 @@ public:
   IO *io;
   PRG prg;
   Ferret *ferret = nullptr;
-  F2kVOLE<F2kDefaultPolicy, IO> *svole = nullptr;
+  F2kVOLE<AuthValueF2k, IO> *svole = nullptr;
   RamPolyPrdt<IO> *polyprdt = nullptr;
   // One chunk of scratch for ferret->rcot_*_next; allocated lazily in
   // andgate_correctness_check_manage. The bool backend opens the
@@ -44,7 +44,7 @@ public:
       this->delta = ferret->Delta;
     else
       this->delta = zero_block;
-    svole = new F2kVOLE<F2kDefaultPolicy, IO>(party, io);
+    svole = new F2kVOLE<AuthValueF2k, IO>(party, io);
     BUFFER_SZ = svole->chunk_aligned_buf_sz();
 
     auth_buffer.resize(BUFFER_SZ);
@@ -221,8 +221,7 @@ public:
     andgate_correctness_check_alice(sum, check_cnt, seed);
 
     if (ope_buf.empty()) ope_buf.resize(ferret->chunk_ots());
-    // Prover side: ferret is BOB → OT-receiver → use rcot_recv_next.
-    ferret->rcot_recv_next(ope_buf.data());
+    ferret->rcot_next(ope_buf.data());
     block *ope_data = ope_buf.data();
     uint64_t ch_bits[2];
     for (int i = 0; i < 2; ++i) {
@@ -345,8 +344,7 @@ public:
     andgate_correctness_check_bob(sum, check_cnt, seed);
 
     if (ope_buf.empty()) ope_buf.resize(ferret->chunk_ots());
-    // Verifier side: ferret is ALICE → OT-sender → use rcot_send_next.
-    ferret->rcot_send_next(ope_buf.data());
+    ferret->rcot_next(ope_buf.data());
     block *ope_data = ope_buf.data();
     block B_star;
     pack.packing(&B_star, ope_data);

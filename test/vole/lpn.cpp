@@ -6,7 +6,7 @@ using namespace std;
 
 int party, port;
 
-using AV = MersennePolicy61::AuthValue;
+using AV = AuthValueFp;
 
 void check_triple(NetIO *io, uint64_t delta, AV *pairs, int size) {
   if (party == ALICE) {
@@ -31,7 +31,7 @@ void check_triple(NetIO *io, uint64_t delta, AV *pairs, int size) {
 }
 
 void test_lpn(NetIO *io, int party) {
-  Base_svole<NetIO> *svole;
+  Base_svole<AuthValueFp, NetIO> *svole;
 
   PRG prg;
   uint64_t Delta;
@@ -46,16 +46,16 @@ void test_lpn(NetIO *io, int party) {
   AV *pre  = new AV[test_k];
 
   if (party == ALICE) {
-    svole = new Base_svole<NetIO>(party, io, (__uint128_t)Delta);
+    svole = new Base_svole<AuthValueFp, NetIO>(party, io, (__uint128_t)Delta);
     svole->triple_gen_send(out, test_n);
     svole->triple_gen_send(pre, test_k);
   } else {
-    svole = new Base_svole<NetIO>(party, io);
+    svole = new Base_svole<AuthValueFp, NetIO>(party, io);
     svole->triple_gen_recv(out, test_n);
     svole->triple_gen_recv(pre, test_k);
   }
 
-  Lpn<MersennePolicy61, 10> lpn(test_k);
+  Lpn<AuthValueFp, 10> lpn(test_k);
   lpn.reseed(zero_block);
   auto start = clock_start();
   lpn.compute_slice(out, pre, test_n);

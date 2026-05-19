@@ -38,7 +38,7 @@ void check_triple(NetIO *io, uint64_t delta,
 }
 
 void test_vole_triple(NetIO *ios[threads + 1], int party) {
-  FpVOLE<MersennePolicy61, NetIO> vtriple(party, ios[0]);
+  FpVOLE<AuthValueFp, NetIO> vtriple(party, ios[0]);
   uint64_t Delta = 0;
   if (party == ALICE) {
     PRG prg;
@@ -50,7 +50,7 @@ void test_vole_triple(NetIO *ios[threads + 1], int party) {
 
   auto start = clock_start();
   const int64_t triple_need = vtriple.chunk_aligned_buf_sz();
-  std::vector<MersennePolicy61::AuthValue> buf(triple_need);
+  std::vector<AuthValueFp> buf(triple_need);
   vtriple.extend(buf.data(), triple_need);
   std::cout << triple_need << "\t" << time_from(start) / 1000 << " ms"
             << std::endl;

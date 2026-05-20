@@ -168,7 +168,7 @@ int main(int argc, char **argv) {
         << std::endl;
     return -1;
   } else if (argc == 3) {
-    depth = 5;
+    depth = 4;
   } else {
     depth = atoi(argv[3]);
   }

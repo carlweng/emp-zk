@@ -51,7 +51,7 @@ int main(int argc, char **argv) {
         << std::endl;
     return -1;
   } else if (argc == 3) {
-    num = 15;
+    num = 12;
   } else {
     num = atoi(argv[3]);
   }

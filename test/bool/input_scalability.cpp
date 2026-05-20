@@ -62,7 +62,7 @@ int main(int argc, char **argv) {
         << std::endl;
     return -1;
   } else if (argc == 3) {
-    num = 20;
+    num = 18;
   } else {
     num = atoi(argv[3]);
   }

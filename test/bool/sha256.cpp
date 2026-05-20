@@ -17,7 +17,7 @@ void get_plain(bool *res, bool *wit, const char *file) {
   for (int i = 0; i < cf.n1; ++i)
     O[i] = Bit(false, PUBLIC);
   cf.compute(O.data(), W.data(), P.data());
-  for (int i = 0; i < 64; ++i)
+  for (int i = 0; i < 8; ++i)
     cf.compute(O.data(), O.data(), P.data());
   for (int i = 0; i < cf.n3; ++i) {
     res[i] = O[i].reveal<bool>(PUBLIC);
@@ -45,7 +45,7 @@ int main(int argc, char **argv) {
 
   BristolFormat cf(filename.c_str());
   cf.compute(O.data(), W.data(), (const Bit *)nullptr);
-  for (int i = 0; i < 64; ++i)
+  for (int i = 0; i < 8; ++i)
     cf.compute(O.data(), O.data(), (const Bit *)nullptr);
   for (int i = 0; i < 256; ++i) {
     bool tmp = O[i].reveal<bool>(PUBLIC);

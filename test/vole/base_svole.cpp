@@ -40,7 +40,7 @@ void test_base_svole(NetIO *io, int party) {
   uint64_t Delta = 0;
   if (party == ALICE) {
     PRG prg;
-    prg.random_data(&Delta, sizeof(uint64_t));
+    prg.random_data_unaligned(&Delta, sizeof(uint64_t));
     Delta = mod(Delta);
     if (Delta == 0) Delta = 1;
     svole = new Base_svole<AuthValueFp, NetIO>(party, io, (__uint128_t)Delta);

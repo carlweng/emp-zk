@@ -35,7 +35,7 @@ void test_lpn(NetIO *io, int party) {
 
   PRG prg;
   uint64_t Delta;
-  prg.random_data(&Delta, sizeof(uint64_t));
+  prg.random_data_unaligned(&Delta, sizeof(uint64_t));
   Delta = mod(Delta);
   if (Delta == 0) Delta = 1;
 

@@ -248,7 +248,7 @@ public:
       ios[0]->recv_data(&rand_pt, sizeof(uint32_t));
     } else {
       PRG prg;
-      prg.random_data(&rand_pt, sizeof(uint32_t));
+      prg.random_data_unaligned(&rand_pt, sizeof(uint32_t));
       rand_pt = rand_pt % range;
       ios[0]->send_data(&rand_pt, sizeof(uint32_t));
       ios[0]->flush();

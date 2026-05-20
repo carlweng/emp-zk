@@ -42,7 +42,7 @@ void test_vole_triple(NetIO *ios[threads + 1], int party) {
   uint64_t Delta = 0;
   if (party == ALICE) {
     PRG prg;
-    prg.random_data(&Delta, sizeof(uint64_t));
+    prg.random_data_unaligned(&Delta, sizeof(uint64_t));
     Delta = mod(Delta);
     if (Delta == 0) Delta = 1;
     vtriple.set_delta(Delta);

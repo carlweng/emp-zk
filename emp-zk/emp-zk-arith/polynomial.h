@@ -54,7 +54,7 @@ public:
       io->send_data(check_sum, 2 * sizeof(uint64_t));
     } else {
       PRG prg;
-      prg.random_data(&seed, sizeof(uint64_t));
+      prg.random_data_unaligned(&seed, sizeof(uint64_t));
       seed = mod(seed);
       io->send_data(&seed, sizeof(uint64_t));
 

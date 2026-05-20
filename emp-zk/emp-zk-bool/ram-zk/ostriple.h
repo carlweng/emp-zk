@@ -40,7 +40,13 @@ public:
       this->delta = ferret->Delta;
     else
       this->delta = zero_block;
-    svole = new F2kVOLE<AuthValueF2k, IO>(party, io);
+    // ram-zk's auth-triple stream sizes off chunk_aligned_buf_sz, which
+    // at the Svole default (ferret_b13) provisions ~14M auth values per
+    // refill — wildly over what the RAM workloads consume. The smaller
+    // ferret_b10 (~870K) keeps the Ferret bootstrap from dominating
+    // debug-mode test time without changing protocol semantics.
+    svole = new F2kVOLE<AuthValueF2k, IO>(party, io, /*malicious=*/true,
+                                          tuning::ferret_b10);
     // Pin the svole's Δ to the shared Ferret's Δ; otherwise svole auths
     // and zk_bool auths would live under different Δs, breaking the
     // mac arithmetic in compute_mul / andgate batch checks.

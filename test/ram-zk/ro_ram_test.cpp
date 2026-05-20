@@ -7,7 +7,7 @@ using namespace std;
 int port, party;
 const int threads = 1;
 // int index_sz = 23, val_sz = 32;
-int index_sz = 3, val_sz = 32;
+int index_sz = 5, val_sz = 32;
 
 uint64_t comm(BoolIO *ios[threads]) {
   uint64_t c = 0;

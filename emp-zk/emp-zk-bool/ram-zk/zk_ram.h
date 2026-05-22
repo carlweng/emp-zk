@@ -1,357 +1,155 @@
 #ifndef EMP_ZK_RAM_H__
 #define EMP_ZK_RAM_H__
-#include "emp-zk/emp-zk-bool/zk_bool_base.h"
-#include "emp-zk/emp-zk-bool/ram-zk/gf_base.h"
-#include "emp-zk/emp-zk-bool/ram-zk/ostriple.h"
+
+#include "emp-zk/emp-zk-bool/ram-zk/zk_ram_pack.h"
+#include "emp-zk/emp-zk-bool/ram-zk/zk_set.h"
+#include "emp-zk/emp-zk-bool/zk_perm_proof.h"
 
 namespace emp {
 using namespace std;
 
+// Zero-knowledge memory via the "two shuffles" construction (Yang–Heath, "Two
+// Shuffles Make a RAM", §4.3, Fig. 9). One class serves both read/write RAM
+// and read-only ROM; `read_only` selects between them.
+//
+// Each access reads the old contents and writes back fresh contents — a store
+// overwrites, a load (or any read-only access) rewrites the same value —
+// recording a (address, value, time) read and a matching write into `perm`. A
+// monotone public clock timestamps every write. Soundness rests on:
+//   shuffle 1: reads ∼ writes            (every read references a real write)
+//   shuffle 2: clock − t ∈ {1, …, T}     (that write happened in the past)
+// Shuffle 1 alone forces every returned value to equal *some* past write to
+// the same address; the monotone clock forbids cycles. For read/write memory
+// that is not enough — a value can change, so a malicious prover could read a
+// future write — and shuffle 2 (a ZKSet membership proof) pins each read to
+// the *most recent* write (Invariant 2). For read-only memory the value never
+// changes, so any past version is the right one: shuffle 2 is unnecessary and
+// is skipped, recovering the single-permutation ROM cost.
+//
+// T is the maximum number of read()/write() accesses (not counting init or
+// the teardown in check()); it bounds the timestamp range, and in read/write
+// mode the freshness set {1, …, T}. Operation type is public, so no
+// multiplexer multiplication is needed (Fig. 9's op·(w−old) term).
+// Usage: init() once, read()/write() up to T times, check() once.
 template <typename IO> class ZKRam {
 public:
-  uint64_t capacity = 1, step = 0;
-  vector<uint64_t> mem;
-  vector<block> check_MAC;
-  vector<__uint128_t> list;
   int party;
-  int64_t index_sz, step_sz, val_sz;
-  IO *io;
-  block Delta;
-  GaloisFieldPacking gfp;
-  RamOSTripleBase<IO> *ostriple = nullptr;
-  double online = 0, check1 = 0, check2 = 0;
-  ZKRam(int _party, int64_t index_sz, int64_t step_sz, int64_t val_sz)
-      : party(_party), index_sz(index_sz), step_sz(step_sz), val_sz(val_sz) {
-    capacity = (capacity << index_sz);
-    mem.resize(capacity);
-    auto *exec = emp::get_bool_backend();
-    io = exec->io;
-    Delta = exec->delta;
-    ostriple =
-        (party == ALICE ? static_cast<RamOSTripleBase<IO>*>(new RamOSTripleProver<IO>(exec->io, exec->ferret)) : static_cast<RamOSTripleBase<IO>*>(new RamOSTripleVerifier<IO>(exec->io, exec->ferret)));
+  bool read_only;
+  int64_t index_sz, val_sz, T;
+  int64_t time_sz;                 // holds timestamps 0 … T
+  int64_t n = 0;                   // number of cells
+  int64_t clock = 1;               // public; setup writes are time 0
+  vector<uint64_t> mem;            // ALICE: current value per cell
+  vector<uint64_t> last_t;         // ALICE: time of last write per cell
+  ZKBoolBase *bb;
+  ZKPermProof perm;                // shuffle 1: reads ∼ writes
+  ZKSet<IO> *diffs = nullptr;      // shuffle 2 (read/write only): clock−t in {1..T}
+  vector<F2kAuthValue> elem_;
+
+  ZKRam(int party, int64_t index_sz, int64_t val_sz, int64_t T,
+        bool read_only = false)
+      : party(party), read_only(read_only), index_sz(index_sz), val_sz(val_sz),
+        T(T), time_sz(ramzk_bits_for(T)), bb(get_bool_backend()),
+        perm(index_sz + val_sz + time_sz) {
+    if (!read_only)
+      diffs = new ZKSet<IO>(party, T, time_sz);
   }
 
-  ~ZKRam() { delete ostriple; }
+  ~ZKRam() { delete diffs; }
 
-  // can be packed in either order, return extension value and its mac
-  void pack(block &mac, const Integer &index, const Integer &val,
-            const Integer &step, const Bit &op) {
-    block res, res1;
-    vector_inn_prdt_sum_red(&res, (block *)(val.bits.data()), ramzk_gf_base(),
-                            val_sz);
-    gfmul(op.bit, ramzk_gf_base()[val_sz], &res1);
-    res = res ^ res1;
-    vector_inn_prdt_sum_red(&res1, (block *)(step.bits.data()),
-                            ramzk_gf_base() + val_sz + 1, step_sz);
-    res = res ^ res1;
-    vector_inn_prdt_sum_red(&res1, (block *)(index.bits.data()),
-                            ramzk_gf_base() + val_sz + 1 + step_sz, index_sz);
-    res = res ^ res1;
-    mac = res;
-  }
-
-  // index || step || op || value
-  __uint128_t pack(uint64_t index, uint64_t value, uint64_t step, uint64_t op) {
-    __uint128_t res = (index << (step_sz + 1)) | (step << 1) | (op & 0x1);
-    res <<= val_sz;
-    res |= value;
-    return res;
-  }
-
-  Integer access(const Bit &op, const Integer &index, const Integer &value) {
-    auto t1 = clock_start();
-    uint64_t clear_index = index.reveal<uint64_t>(ALICE);
-    bool clear_op = op.reveal<bool>(ALICE);
-    uint64_t clear_val = 0;
-    Integer prv_val;
-    block m;
+  // Setup: commit the initial contents and emit a write (i, x[i], 0) per cell.
+  void init(vector<Integer> &content) {
+    n = (int64_t)content.size();
     if (party == ALICE) {
-      if (clear_op == 0) {
-        clear_val = mem[clear_index];
-      } else {
-        clear_val = value.reveal<uint64_t>(ALICE);
-        mem[clear_index] = clear_val;
-      }
-      prv_val = Integer(val_sz, clear_val, ALICE);
-      list.push_back(pack(clear_index, clear_val, step, clear_op));
-    } else
-      prv_val = Integer(val_sz, clear_val, ALICE);
-    pack(m, index, prv_val, Integer(step_sz, step, PUBLIC), op);
-    check_MAC.push_back(m);
-    step++;
-    online += time_from(t1);
-    return prv_val;
-  }
-
-  Integer read(const Integer &index) {
-    auto t1 = clock_start();
-    uint64_t clear_index = index.reveal<uint64_t>(ALICE);
-    uint64_t tmp = 0;
-    if (party == ALICE) {
-      tmp = mem[clear_index];
-      list.push_back(pack(clear_index, tmp, step, 0));
+      mem.resize(n);
+      last_t.assign(n, 0);
     }
-    Integer res = Integer(val_sz, tmp, ALICE);
-    block m;
-    pack(m, index, res, Integer(step_sz, step, PUBLIC), Bit(false, PUBLIC));
-    check_MAC.push_back(m);
-    step++;
-    online += time_from(t1);
-    return res;
+    Integer time0(time_sz, (uint64_t)0, PUBLIC);
+    for (int64_t i = 0; i < n; ++i) {
+      if (party == ALICE)
+        mem[i] = content[i].reveal<uint64_t>(ALICE);
+      else
+        content[i].reveal<uint64_t>(ALICE);
+      emit_(/*toA=*/false, content[i], Integer(index_sz, (uint64_t)i, PUBLIC),
+            time0);
+    }
   }
+
+  Integer read(const Integer &index) { return access_(index, index, false); }
 
   void write(const Integer &index, const Integer &value) {
-    auto t1 = clock_start();
-    uint64_t clear_index = index.reveal<uint64_t>(ALICE);
-    uint64_t clear_value = value.reveal<uint64_t>(ALICE);
-    if (party == ALICE) {
-      mem[clear_index] = clear_value;
-      list.push_back(pack(clear_index, clear_value, step, 1));
-    }
-    block m;
-    pack(m, index, value, Integer(step_sz, step, PUBLIC), Bit(true, PUBLIC));
-    check_MAC.push_back(m);
-    step++;
-    online += time_from(t1);
-    return;
-  }
-  void refresh() {
-    if (step + capacity == (1 << (step_sz - 1))) {
-      vector<Integer> tmp;
-      for (size_t i = 0; i < capacity; ++i) {
-        auto val = read(Integer(index_sz, i, PUBLIC));
-        tmp.push_back(val);
-      }
-      check();
-      for (size_t i = 0; i < capacity; ++i) {
-        write(Integer(index_sz, i, PUBLIC), tmp[i]);
-      }
-    }
+    if (read_only)
+      error("ZKRam: write() on read-only memory");
+    access_(index, value, true);
   }
 
+  // Teardown: read every cell's final state, then run the shuffle(s).
   void check() {
-    auto t1 = clock_start();
-    vector<__uint128_t> sorted_list;
-    if (party == ALICE) {
-      sorted_list = vector<__uint128_t>(list.begin(), list.end());
-      sort(sorted_list.begin(), sorted_list.end());
+    for (int64_t i = 0; i < n; ++i) {
+      uint64_t v = (party == ALICE) ? mem[i] : 0;
+      uint64_t t = (party == ALICE) ? last_t[i] : 0;
+      emit_(/*toA=*/true, Integer(val_sz, v, ALICE),
+            Integer(index_sz, (uint64_t)i, PUBLIC), Integer(time_sz, t, ALICE));
     }
-    vector<Integer> sort_value, sort_index, sort_step;
-    vector<Bit> sort_op;
-
-    __uint128_t val_mask = ((__uint128_t)1 << val_sz) - 1;
-    uint64_t idx_mask = ((uint64_t)1 << index_sz) - 1;
-    __uint128_t step_mask = ((__uint128_t)1 << step_sz) - 1;
-    for (size_t i = 0; i < step; ++i) {
-      __uint128_t val = 0;
-      if (party == ALICE)
-        val = sorted_list[i];
-      sort_value.push_back(Integer(val_sz, val & val_mask, ALICE));
-      val = val >> val_sz;
-      uint64_t high = val & 0xFFFFFFFFFFFFFFFFLL;
-      sort_op.push_back(Bit(high & 0x1, ALICE));
-      high = high >> 1;
-      sort_step.push_back(Integer(step_sz, high & step_mask, ALICE));
-      val = val >> (step_sz + 1);
-      sort_index.push_back(Integer(index_sz + 1, val & idx_mask, ALICE));
-    }
-
-    Bit condition = Bit(true, PUBLIC);
-    for (size_t i = 1; i < step; ++i) {
-      auto eq = sort_index[i - 1] == sort_index[i];
-      condition = condition & ((sort_index[i - 1] < sort_index[i]) |
-                               (eq & (sort_step[i - 1] < sort_step[i])));
-      condition =
-          condition & ((sort_value[i - 1] == sort_value[i]) | sort_op[i]);
-      condition = condition & (eq | sort_op[i]);
-    }
-    if (!condition.reveal())
-      cout << "wrong!!\n";
-
-    sync_zk_bool();
-    vector<block> sorted_MAC;
-    // Now check that sort_value, sort_index, sort_step, sort_op is consistent
-    // with the other set of values
-    for (size_t i = 0; i < step; ++i) {
-      block m;
-      pack(m, sort_index[i], sort_value[i], sort_step[i], sort_op[i]);
-      sorted_MAC.push_back(m);
-    }
-    check1 += time_from(t1);
-    check_set_euqality((block *)sorted_list.data(), sorted_MAC,
-                       (block *)list.data(), check_MAC);
-    mem.clear();
-    check_MAC.clear();
-    list.clear();
-    step = 0;
+    perm.check_eq();
+    if (!read_only)
+      diffs->check();
   }
 
-  void inn_prdt(block &val, block &mac, block *X, vector<block> &MAC, block r) {
-    block x, m;
-    size_t i = 1;
+private:
+  // One access. `value` is the new contents on a store; ignored on a load
+  // (where we pass `index` as a harmless placeholder). Returns the old value.
+  Integer access_(const Integer &index, const Integer &value, bool is_write) {
+    uint64_t ci = index.reveal<uint64_t>(ALICE);
+    uint64_t v_old = 0, t_old = 0;
     if (party == ALICE) {
-      ostriple->compute_add_const(val, mac, X[0], MAC[0], r);
-      while (i < step) {
-        ostriple->compute_add_const(x, m, X[i], MAC[i], r);
-        ostriple->compute_mul(val, mac, val, mac, x, m);
-        ++i;
-      }
-    } else {
-      block dummy = zero_block;
-      ostriple->compute_add_const(val, mac, dummy, MAC[0], r);
-      while (i < step) {
-        ostriple->compute_add_const(x, m, dummy, MAC[i], r);
-        ostriple->compute_mul(val, mac, val, mac, x, m);
-        ++i;
-      }
+      v_old = mem[ci];
+      t_old = last_t[ci];
     }
+    Integer old(val_sz, v_old, ALICE);
+    Integer time_old(time_sz, t_old, ALICE);
+
+    // shuffle 2: prove the last write to this cell is in the past.
+    if (!read_only) {
+      Integer diff = Integer(time_sz, (uint64_t)clock, PUBLIC) - time_old;
+      diffs->prove_member(diff);
+    }
+
+    // shuffle 1: read the old (addr, value, time), write back the new state.
+    emit_(/*toA=*/true, old, index, time_old);
+    Integer newv = is_write ? value : old;
+    emit_(/*toA=*/false, newv, index, Integer(time_sz, (uint64_t)clock, PUBLIC));
+
+    if (party == ALICE) {
+      mem[ci] = is_write ? value.reveal<uint64_t>(ALICE) : v_old;
+      last_t[ci] = clock;
+    } else if (is_write) {
+      value.reveal<uint64_t>(ALICE);   // keep the two parties' reveals in lockstep
+    }
+    ++clock;
+    return old;
   }
 
-  void inn_prdt_bch2(block &val, block &mac, block *X, vector<block> &MAC,
-                     block r) {
-    block x[2], m[2];
-    size_t i = 1;
-    if (party == ALICE) {
-      ostriple->compute_add_const(val, mac, X[0], MAC[0], r);
-      while (i < step - 1) {
-        ostriple->compute_add_const(x[0], m[0], X[i], MAC[i], r);
-        ostriple->compute_add_const(x[1], m[1], X[i + 1], MAC[i + 1], r);
-        ostriple->compute_mul_poly(val, mac, val, mac, x[0], m[0], x[1], m[1]);
-        i += 2;
-      }
-      while (i < step) {
-        ostriple->compute_add_const(x[0], m[0], X[i], MAC[i], r);
-        ostriple->compute_mul(val, mac, val, mac, x[0], m[0]);
-        ++i;
-      }
-    } else {
-      block dummy = zero_block;
-      ostriple->compute_add_const(val, mac, dummy, MAC[0], r);
-      while (i < step - 1) {
-        ostriple->compute_add_const(x[0], m[0], dummy, MAC[i], r);
-        ostriple->compute_add_const(x[1], m[1], dummy, MAC[i + 1], r);
-        ostriple->compute_mul_poly(val, mac, val, mac, x[0], m[0], x[1], m[1]);
-        i += 2;
-      }
-      while (i < step) {
-        ostriple->compute_add_const(x[0], m[0], dummy, MAC[i], r);
-        ostriple->compute_mul(val, mac, val, mac, x[0], m[0]);
-        ++i;
-      }
-    }
-  }
-
-  void inn_prdt_bch3(block &val, block &mac, block *X, vector<block> &MAC,
-                     block r) {
-    block x[3], m[3];
-    size_t i = 1;
-    if (party == ALICE) {
-      ostriple->compute_add_const(val, mac, X[0], MAC[0], r);
-      while (i < step - 2) {
-        for (int j = 0; j < 3; ++j)
-          ostriple->compute_add_const(x[j], m[j], X[i + j], MAC[i + j], r);
-        ostriple->compute_mul_poly(val, mac, val, mac, x[0], m[0], x[1], m[1], x[2],
-                               m[2]);
-        i += 3;
-      }
-      while (i < step) {
-        ostriple->compute_add_const(x[0], m[0], X[i], MAC[i], r);
-        ostriple->compute_mul(val, mac, val, mac, x[0], m[0]);
-        ++i;
-      }
-    } else {
-      block dummy = zero_block;
-      ostriple->compute_add_const(val, mac, dummy, MAC[0], r);
-      while (i < step - 2) {
-        for (int j = 0; j < 3; ++j)
-          ostriple->compute_add_const(x[j], m[j], dummy, MAC[i + j], r);
-        ostriple->compute_mul_poly(val, mac, val, mac, x[0], m[0], x[1], m[1], x[2],
-                               m[2]);
-        i += 3;
-      }
-      while (i < step) {
-        ostriple->compute_add_const(x[0], m[0], dummy, MAC[i], r);
-        ostriple->compute_mul(val, mac, val, mac, x[0], m[0]);
-        ++i;
-      }
-    }
-  }
-
-  void inn_prdt_bch4(block &val, block &mac, block *X, vector<block> &MAC,
-                     block r) {
-    block x[4], m[4];
-    size_t i = 1;
-    if (party == ALICE) {
-      ostriple->compute_add_const(val, mac, X[0], MAC[0], r);
-      while (i < step - 3) {
-        for (int j = 0; j < 4; ++j)
-          ostriple->compute_add_const(x[j], m[j], X[i + j], MAC[i + j], r);
-        ostriple->compute_mul_poly(val, mac, val, mac, x[0], m[0], x[1], m[1], x[2],
-                               m[2], x[3], m[3]);
-        i += 4;
-      }
-      while (i < step) {
-        ostriple->compute_add_const(x[0], m[0], X[i], MAC[i], r);
-        ostriple->compute_mul(val, mac, val, mac, x[0], m[0]);
-        ++i;
-      }
-    } else {
-      block dummy = zero_block;
-      ostriple->compute_add_const(val, mac, dummy, MAC[0], r);
-      while (i < step - 3) {
-        for (int j = 0; j < 4; ++j)
-          ostriple->compute_add_const(x[j], m[j], dummy, MAC[i + j], r);
-        ostriple->compute_mul_poly(val, mac, val, mac, x[0], m[0], x[1], m[1], x[2],
-                               m[2], x[3], m[3]);
-        i += 4;
-      }
-      while (i < step) {
-        ostriple->compute_add_const(x[0], m[0], dummy, MAC[i], r);
-        ostriple->compute_mul(val, mac, val, mac, x[0], m[0]);
-        ++i;
-      }
-    }
-  }
-
-  void check_set_euqality(block *sorted_X, vector<block> &sorted_MAC,
-                          block *check_X, vector<block> &check_MAC) {
-    auto t1 = clock_start();
-    block r, val[2], mac[2];
-    r = io->get_hash_block();
-    inn_prdt_bch4(val[0], mac[0], sorted_X, sorted_MAC, r);
-    inn_prdt_bch4(val[1], mac[1], check_X, check_MAC, r);
-
-    if (party == ALICE) {
-      io->send_data(mac, 2 * sizeof(block));
-      io->flush();
-    } else {
-      block macrecv[2];
-      io->recv_data(macrecv, 2 * sizeof(block));
-      mac[0] ^= macrecv[0];
-      mac[1] ^= macrecv[1];
-      if (memcmp(mac, mac + 1, 16) != 0) {
-        error("check set equality failed!\n");
-      }
-    }
-    check2 += time_from(t1);
-  }
-
-  void check_MAC_valid(block X, block MAC) {
-    if (party == ALICE) {
-      io->send_data(&X, 16);
-      io->send_data(&MAC, 16);
-    } else {
-      block M = zero_block, x = zero_block;
-      io->recv_data(&x, 16);
-      io->recv_data(&M, 16);
-      gfmul(x, Delta, &x);
-      x = x ^ MAC;
-      if (memcmp(&x, &M, 16) != 0) {
-        error("check_MAC failed!\n");
-      }
-    }
+  void emit_(bool toA, const Integer &value, const Integer &index,
+             const Integer &time) {
+    elem_.clear();
+    ramzk_pack_record(bb, {&value, &index, &time}, elem_);
+    if (toA)
+      perm.add_A(elem_.data());
+    else
+      perm.add_B(elem_.data());
   }
 };
-}  // namespace emp
 
+// Read-only memory: ZKRam with shuffle 2 disabled. The value-chain (each read
+// rewrites the same value under a fresh, monotone timestamp) anchors every
+// read to the setup value without a freshness proof. T is the maximum number
+// of read() lookups. read() returns the looked-up value; write() is illegal.
+template <typename IO> class ZKROM : public ZKRam<IO> {
+public:
+  ZKROM(int party, int64_t index_sz, int64_t val_sz, int64_t T)
+      : ZKRam<IO>(party, index_sz, val_sz, T, /*read_only=*/true) {}
+};
+
+} // namespace emp
 #endif // EMP_ZK_RAM_H__

@@ -1,3 +1,4 @@
+#include "../test_io_helpers.h"
 #include "emp-tool/emp-tool.h"
 #include "emp-zk/emp-zk.h"
 #include <iostream>
@@ -6,107 +7,67 @@ using namespace std;
 
 int port, party;
 const int threads = 1;
-int index_sz = 5, step_sz = 14, val_sz = 32;
-// int index_sz = 20, step_sz = 25, val_sz = 32;
+// val_sz is wide on purpose: index_sz + val_sz + time_sz > 128 forces each
+// record to span two f2k wires, exercising ZKPermProof's multi-block compress
+// path (the capability that subsumes the old multi-block ZKRamExt). Values
+// themselves stay < 2^16. Single-block records are covered by rom_test/set_test.
+int index_sz = 5, val_sz = 130;
 
-uint64_t comm(BoolIO *ios[threads]) {
-  uint64_t c = 0;
-  for (int i = 0; i < threads; ++i)
-    c += ios[i]->counter;
-  return c;
-}
-uint64_t comm2(BoolIO *ios[threads]) {
-  uint64_t c = 0;
-  for (int i = 0; i < threads; ++i)
-    c += ios[i]->io->counter;
-  return c;
-}
-void bench(BoolIO *ios[threads], int party) {
+// Two-shuffles read/write RAM (unified ZKRam, read/write mode): init, an
+// interleaved load/store stream that mutates cells, read-back checks, then
+// check(). `bad` makes a malicious prover forge a stored value so the verifier
+// must abort.
+void test(BoolIO *ios[threads], int party, bool bad) {
   setup_zk_bool(ios[0], party);
-  uint64_t com1 = comm(ios);
-  uint64_t com11 = comm2(ios);
+  int cells = (1 << index_sz);
+
+  int rounds = 4;
+  int64_t T = (int64_t)rounds * cells * 2;   // each sweep: 1 write + 1 read / cell
+
+  vector<Integer> data;
+  for (int i = 0; i < cells; ++i)
+    data.push_back(Integer(val_sz, i, ALICE));
+
+  ZKRam<BoolIO> *ram = new ZKRam<BoolIO>(party, index_sz, val_sz, T);
+  ram->init(data);
+
+  if (bad && party == ALICE)
+    ram->mem[0] += 1;   // forge cell 0: future reads carry a wrong value
+
   auto start = clock_start();
-  ZKRam<BoolIO> *ram =
-      new ZKRam<BoolIO>(party, index_sz, step_sz, val_sz);
-  for (int i = 0; i < (1 << index_sz); ++i) {
-    ram->write(Integer(index_sz, i, PUBLIC), Integer(val_sz, i, PUBLIC));
-    ram->refresh();
-  }
-  int test_n = (1 << index_sz);
-  Integer ind(index_sz, 0, PUBLIC);
-  Integer value(val_sz, 0, PUBLIC);
-  for (int j = 0; j < test_n / (1 << index_sz); ++j) // same as ro_ram_test
-    for (int i = 0; i < (1 << index_sz); ++i) {
-      ram->read(Integer(index_sz, i, PUBLIC));
-      ram->refresh();
+  int wrong = 0;
+  vector<uint64_t> expect(cells);
+  for (int i = 0; i < cells; ++i)
+    expect[i] = i;
+
+  for (int r = 0; r < rounds; ++r)
+    for (int i = 0; i < cells; ++i) {
+      expect[i] += cells;
+      ram->write(Integer(index_sz, i, PUBLIC), Integer(val_sz, expect[i], ALICE));
+      Integer got = ram->read(Integer(index_sz, i, PUBLIC));
+      Bit eq = got == Integer(val_sz, expect[i], ALICE);
+      if (!eq.reveal<bool>(PUBLIC))
+        wrong++;
     }
-  ram->check();
-  std::cout << "total (us): " << time_from(start) / test_n << std::endl;
-  std::cout << "access (us): " << ram->online / test_n << std::endl;
-  std::cout << "check condition (us): " << ram->check1 / test_n << std::endl;
-  std::cout << "check set equality (us):" << ram->check2 / test_n << std::endl;
+  ram->check();   // both shuffles; aborts on a forged value
+  double t = time_from(start);
+
   delete ram;
   finalize_zk_bool();
-
-  uint64_t com2 = comm(ios) - com1;
-  uint64_t com22 = comm2(ios) - com11;
-  std::cout << "communication (B): " << com2 << std::endl;
-  std::cout << "communication (B): " << com22 << std::endl;
-}
-
-void test(BoolIO *ios[threads], int party) {
-  setup_zk_bool(ios[0], party);
-  ZKRam<BoolIO> *ram =
-      new ZKRam<BoolIO>(party, index_sz, step_sz, val_sz);
-  for (int i = 0; i < (1 << index_sz); ++i) {
-    ram->write(Integer(index_sz, i, PUBLIC), Integer(val_sz, 2 * i, PUBLIC));
-    ram->refresh();
-  }
-  for (int i = 0; i < (1 << index_sz); ++i) {
-    Integer res = ram->read(Integer(index_sz, i, PUBLIC));
-    ram->refresh();
-    Bit eq = res == Integer(val_sz, i * 2, ALICE);
-    if (!eq.reveal<bool>(PUBLIC)) {
-      cout << i << "something is wrong!!\n";
-    }
-  }
-  ram->check();
-  for (int i = 0; i < (1 << index_sz); ++i) {
-    ram->write(Integer(index_sz, i, PUBLIC), Integer(val_sz, 3 * i, PUBLIC));
-    ram->refresh();
-  }
-  for (int i = 0; i < (1 << index_sz); ++i) {
-    Integer res = ram->read(Integer(index_sz, i, PUBLIC));
-    ram->refresh();
-    Bit eq = res == Integer(val_sz, i * 3, ALICE);
-    if (!eq.reveal<bool>(PUBLIC)) {
-      cout << i << "something is wrong!!\n";
-    }
-  }
-  ram->check();
-  delete ram;
-  finalize_zk_bool();
-  cout << "done\n";
+  int accesses = rounds * cells * 2;
+  cout << "RAM ok (cells=" << cells << ", accesses=" << accesses
+       << ", wrong=" << wrong << ")  " << t / accesses << " us/access  party "
+       << party << endl;
 }
 
 int main(int argc, char **argv) {
   parse_party_and_port(argv, &party, &port);
   BoolIO *ios[threads];
-  for (int i = 0; i < threads; ++i)
-    ios[i] = new BoolIO(
-        new NetIO(party == ALICE ? nullptr : "127.0.0.1", port),
-        party == ALICE);
+  make_bool_ios(ios, party, port);
 
-  if (argc > 3)
-    index_sz = atoi(argv[3]);
+  bool bad = (argc >= 4 && string(argv[3]) == "bad");
+  test(ios, party, bad);
 
-  test(ios, party);
-  bench(ios, party);
-
-  for (int i = 0; i < threads; ++i) {
-    NetIO *raw = static_cast<NetIO *>(ios[i]->io);
-    delete ios[i];
-    delete raw;
-  }
+  destroy_bool_ios(ios);
   return 0;
 }

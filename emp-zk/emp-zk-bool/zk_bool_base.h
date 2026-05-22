@@ -26,9 +26,14 @@
 
 #include "emp-zk/emp-zk-bool/bool_io.h"
 #include "emp-zk/emp-zk-bool/polynomial.h"
+#include "emp-zk/emp-zk-bool/poly_prdt.h"
 
 namespace emp {
 using namespace std;
+
+// The f2k wire type: an authenticated F(2^128) value (val, mac). Same
+// storage as the sVOLE carrier; named for its role as a circuit wire.
+using F2kAuthValue = AuthValueF2k;
 
 class ZKBoolBase : public Backend {
 public:
@@ -44,6 +49,22 @@ public:
   std::vector<block> andgate_out_buffer;
   std::vector<block> andgate_left_buffer;
   std::vector<block> andgate_right_buffer;
+
+  // ---- f2k wire support (lazily initialised on first f2k op) ----------
+  // The second wire type: authenticated F(2^128) values, sharing this
+  // backend's Δ and its one Ferret. f2k_vole streams fresh authenticated
+  // values for f2k_mul; f2k_polyprdt handles the polynomial-product
+  // variant (f2k_mul_poly); the left/right val+mac buffers feed the batch
+  // multiplication check (f2k_check_manage). Conversion from bits is a
+  // local Σ·Xⁱ map (same Δ), so only multiplication is interactive.
+  bool f2k_ready = false;
+  F2kVOLE<AuthValueF2k> *f2k_vole = nullptr;
+  RamPolyPrdt<BoolIO> *f2k_polyprdt = nullptr;
+  int64_t f2k_buffer_sz = 0;
+  int64_t f2k_authval_cnt = 0, f2k_check_cnt = 0;
+  std::vector<AuthValueF2k> f2k_auth_buffer;       // pre-drawn VOLE values
+  std::vector<block> f2k_left_val, f2k_left_mac;
+  std::vector<block> f2k_rght_val, f2k_rght_mac;
 
   GaloisFieldPacking pack;
   BoolIO  *io  = nullptr;
@@ -74,6 +95,14 @@ public:
     andgate_left_buffer.resize(CHECK_SZ);
     andgate_right_buffer.resize(CHECK_SZ);
 
+    // Pre-draw the first batch of COTs into andgate_out_buffer. Each AND
+    // gate consumes one slot (reads the fresh COT, then overwrites the slot
+    // with the gate's output MAC for the eventual batch check), and the
+    // batch boundary in auth_compute_and reloads the whole buffer after each
+    // check. Drawing a full CHECK_SZ batch at once keeps the COT recv as one
+    // burst, decoupled from the per-gate bit traffic flowing the other way.
+    ferret->next_n(andgate_out_buffer.data(), CHECK_SZ);
+
     // Public-input label table — known to both parties by design.
     // PRP(1) key, distinct from ZKFpExec's PRP(0), so the two public
     // outputs live in disjoint pseudorandom domains. Both bits start
@@ -92,6 +121,12 @@ public:
     delete polyproof;   // PolyProof::batch_check draws COTs via next_n — session still open
     ferret->end();      // close the persistent streaming session (final round + chi-fold check)
     delete ferret;
+    // f2k machinery (only allocated if some f2k op ran). The leftover
+    // f2k batch check + polyprdt flush already happened in the subclass
+    // dtor — they need the live vtable and the open Ferret session — so
+    // here we only free. delete nullptr is a no-op when f2k was unused.
+    delete f2k_polyprdt;
+    delete f2k_vole;
   }
 
   // ---- Helper bit ops -------------------------------------------------
@@ -125,11 +160,6 @@ public:
   }
   uint64_t num_and() override { return gid; }
 
-  // ---- Other shared utilities ----------------------------------------
-
-  uint64_t communication() { return io->counter; }
-  void sync() { io->flush(); }
-
   // ---- AND-gate batch correctness check (single-threaded) ------------
   //
   // Derives a Fiat-Shamir seed from the io hash, runs the role-specific
@@ -155,6 +185,110 @@ public:
   // Trailing role-specific aggregation: ALICE packs + sends `A_star`,
   // BOB receives and verifies with cmpBlock.
   virtual void andgate_correctness_aggregate(block *sum) = 0;
+
+  // ---- f2k wire ops ---------------------------------------------------
+  //
+  // Authenticated F(2^128) arithmetic on (val, mac) block pairs. Linear
+  // ops (f2k_add_const) are local; f2k_mul / f2k_mul_poly are interactive
+  // and buffer their triples for the batch check (f2k_check_manage), which
+  // fires once per f2k_buffer_sz multiplications and again at teardown.
+
+  // Allocate the f2k stream + buffers on first use; pure-bool proofs never
+  // pay for it. The f2k VOLE shares this backend's Δ (BOB pins it); its
+  // own inner Ferret keeps its wire bytes separate from the bit Ferret.
+  void f2k_init() {
+    if (f2k_ready) return;
+    f2k_vole = new F2kVOLE<AuthValueF2k>(party, io, /*malicious=*/true,
+                                         tuning::ferret_b10);
+    if (party == BOB) f2k_vole->set_delta(ferret->Delta);
+    f2k_buffer_sz = f2k_vole->chunk_aligned_buf_sz();
+    f2k_auth_buffer.resize(f2k_buffer_sz);
+    f2k_left_val.resize(f2k_buffer_sz);
+    f2k_left_mac.resize(f2k_buffer_sz);
+    f2k_rght_val.resize(f2k_buffer_sz);
+    f2k_rght_mac.resize(f2k_buffer_sz);
+    f2k_polyprdt = new RamPolyPrdt<BoolIO>(party, io, ferret);
+    f2k_ready = true;
+    f2k_pre_buffer_refill();
+  }
+
+  // Bulk-refill the pre-drawn VOLE buffer (one chunk-aligned run, so no
+  // leftover) and reset the consume cursor.
+  void f2k_pre_buffer_refill() {
+    f2k_vole->run(f2k_auth_buffer.data(), f2k_buffer_sz);
+    f2k_authval_cnt = 0;
+  }
+
+  // Pack a cleartext F(2^128) value v into the MAC layout the polynomial
+  // product expects (Σ vᵢ·Xⁱ over the 128 bits of v, via the 65-bit
+  // lo/hi Integer feed).
+  block f2k_pack_v(block v) {
+    uint64_t low  = _mm_extract_epi64(v, 0);
+    uint64_t high = _mm_extract_epi64(v, 1);
+    Integer lowInt(65, low, ALICE);
+    Integer highInt(65, high, ALICE);
+    block packbuf[128], m;
+    memcpy(packbuf,      lowInt.bits.data(),  64 * sizeof(block));
+    memcpy(packbuf + 64, highInt.bits.data(), 64 * sizeof(block));
+    pack.packing(&m, packbuf);
+    return m;
+  }
+
+  // Bundle a (cleartext-field, mac) pair into an f2k wire. The cleartext
+  // val is meaningful only on the prover; the verifier's val lane is
+  // forced to zero. This is the bit→f2k conversion's output shape — the
+  // mac is already Σ wireᵢ·Xⁱ — so callers can hand the same code path the
+  // wire on both sides without a party branch.
+  F2kAuthValue f2k_wire(block val, block mac) const {
+    return AuthValueF2k{ party == ALICE ? val : zero_block, mac };
+  }
+
+  // Local linear f2k ops (no VOLE, no communication, party-agnostic): the
+  // val/mac lanes are both linear in the wire, so scaling by a *public*
+  // field constant or adding two wires is just the same gfmul / XOR on each
+  // share. Used to collapse a multi-block element into one via a public
+  // random linear combination Σ cⱼ·Bⱼ before the permutation product.
+  F2kAuthValue f2k_mul_const(const F2kAuthValue &a, block c) const {
+    F2kAuthValue r;
+    gfmul(c, a.val, &r.val);
+    gfmul(c, a.mac, &r.mac);
+    return r;
+  }
+  F2kAuthValue f2k_add(const F2kAuthValue &a, const F2kAuthValue &b) const {
+    return AuthValueF2k{ a.val ^ b.val, a.mac ^ b.mac };
+  }
+
+  // Polynomial product over N f2k wires: out = ∏ inputs, with the MAC
+  // committed through f2k_polyprdt's degree-N check. ALICE's f2k_mul_v
+  // returns the cleartext product; BOB's returns zero.
+  template <typename... Args>
+  void f2k_mul_poly(F2kAuthValue &out, Args... args) {
+    constexpr int N = sizeof...(args);
+    static_assert(N >= 3 && N <= 5,
+                  "f2k_mul_poly supports N=3, 4, 5 (matches polyPrdt3/4/5)");
+    f2k_init();
+
+    const F2kAuthValue in[N] = { args... };
+    block vals[N], macs[N];
+    for (int i = 0; i < N; ++i) {
+      vals[i] = in[i].val;
+      macs[i] = in[i].mac;
+    }
+    block v = f2k_mul_v(N, vals);
+    block m = f2k_pack_v(v);
+    f2k_polyprdt->template polyPrdtN<N>(vals, macs, m);
+    out.val = v;
+    out.mac = m;
+  }
+
+  // Role-specific f2k arithmetic + batch check (implemented by the
+  // prover / verifier subclasses). Wires are F2kAuthValue (val, mac).
+  virtual void f2k_add_const(F2kAuthValue &out, const F2kAuthValue &in,
+                             block c) = 0;
+  virtual void f2k_mul(F2kAuthValue &out, const F2kAuthValue &a,
+                       const F2kAuthValue &b) = 0;
+  virtual block f2k_mul_v(int64_t N, const block *vals) = 0;
+  virtual void f2k_check_manage() = 0;
 };
 
 // Cross-module accessors. edabit / arith / ram-zk reach into the bool

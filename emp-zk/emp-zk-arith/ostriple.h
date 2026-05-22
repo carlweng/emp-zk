@@ -63,6 +63,13 @@ public:
     andgate_right_buffer.resize(CHECK_SZ);
     __uint128_t tmp;
     vole->next_n((AuthValueFp *)&tmp, 1);
+    // Pre-draw the first batch of authenticated values into
+    // andgate_out_buffer; each multiplication consumes one slot (reads the
+    // fresh VOLE, then overwrites it with the gate's output MAC for the
+    // batch check), and the batch boundary reloads after each check. The
+    // bulk draw keeps the VOLE recv contiguous instead of interleaving a
+    // single next_n with the per-gate value exchange the other way.
+    vole->next_n((AuthValueFp *)andgate_out_buffer.data(), CHECK_SZ);
 
     auth_helper = new FpAuthHelper<IO>(party, io);
   }
@@ -131,12 +138,12 @@ public:
    * authenticated bits for computing AND gates
    */
   __uint128_t auth_compute_mul_send(__uint128_t Ma, __uint128_t Mb) {
-    __uint128_t mac;
     if (check_cnt == CHECK_SZ) {
       andgate_correctness_check_manage();
       check_cnt = 0;
+      vole->next_n((AuthValueFp *)andgate_out_buffer.data(), CHECK_SZ);
     }
-    vole->next_n((AuthValueFp *)&mac, 1);
+    __uint128_t mac = andgate_out_buffer[check_cnt];   // pre-drawn fresh VOLE
     andgate_left_buffer[check_cnt] = Ma;
     andgate_right_buffer[check_cnt] = Mb;
 
@@ -146,19 +153,19 @@ public:
     io->send_data(&s, sizeof(uint64_t));
 
     mac = MAKE_AUTH(d, MAC(mac));
-    andgate_out_buffer[check_cnt] = mac;
+    andgate_out_buffer[check_cnt] = mac;                // overwrite with output MAC
     check_cnt++;
 
     return mac;
   }
 
   __uint128_t auth_compute_mul_recv(__uint128_t Ka, __uint128_t Kb) {
-    __uint128_t key;
     if (check_cnt == CHECK_SZ) {
       andgate_correctness_check_manage();
       check_cnt = 0;
+      vole->next_n((AuthValueFp *)andgate_out_buffer.data(), CHECK_SZ);
     }
-    vole->next_n((AuthValueFp *)&key, 1);
+    __uint128_t key = andgate_out_buffer[check_cnt];   // pre-drawn fresh VOLE key
     andgate_left_buffer[check_cnt] = Ka;
     andgate_right_buffer[check_cnt] = Kb;
 
@@ -169,7 +176,7 @@ public:
     // correction to the mac side only.
     key = MAKE_AUTH(0, add_mod(MAC(key), delta_d));
 
-    andgate_out_buffer[check_cnt] = key;
+    andgate_out_buffer[check_cnt] = key;                // overwrite with wire key
     check_cnt++;
     return key;
   }

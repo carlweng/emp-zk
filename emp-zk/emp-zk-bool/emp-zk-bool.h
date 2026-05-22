@@ -17,7 +17,7 @@ inline void setup_zk_bool(BoolIO *io, int party) {
 // holds it; calling on the prover side is a programmer error.
 inline block get_bool_delta() { return get_bool_backend_ver()->delta; }
 
-inline void sync_zk_bool() { get_bool_backend()->sync(); }
+inline void sync_zk_bool() { get_bool_backend()->io->flush(); }
 
 inline void finalize_zk_bool() {
   delete backend;
@@ -53,4 +53,16 @@ inline void zkp_inner_prdt_multi(Integer *x, Integer *y, Bit *r, Bit *s,
 }
 
 } // namespace emp
+
+// Multiset permutation-check gadget (the core of VOLE-ZK RAM/ROM). Generic
+// over f2k wires; depends only on the backend above.
+#include "emp-zk/emp-zk-bool/zk_perm_proof.h"
+
+// RAM-ZK circuits build directly on this backend — they call
+// get_bool_backend(), sync_zk_bool(), and the f2k wire ops above — so they
+// live here rather than as a separate module. Included after the namespace
+// block so sync_zk_bool() is already declared.
+#include "emp-zk/emp-zk-bool/ram-zk/zk_set.h"
+#include "emp-zk/emp-zk-bool/ram-zk/zk_ram.h"
+
 #endif

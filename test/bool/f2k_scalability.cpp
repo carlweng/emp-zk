@@ -1,0 +1,62 @@
+#include "../test_io_helpers.h"
+#include "emp-tool/emp-tool.h"
+#include <emp-zk/emp-zk.h>
+#include <iostream>
+using namespace emp;
+using namespace std;
+
+int port, party;
+const int threads = 1;
+const int W = 64;   // bit width of each fed value
+
+// Build a valid authenticated f2k wire from a fresh ALICE-input value:
+// feed W authenticated bits, then pack them into one F(2^128) element via
+// the local Σ·Xⁱ map (mac from the bit wires, val from the cleartext LSBs).
+static F2kAuthValue make_wire(uint64_t v) {
+  Integer x(W, v, ALICE);
+  block *bits = (block *)x.bits.data();
+  block mac;
+  vector_inn_prdt_sum_red(&mac, bits, ramzk_gf_base(), W);
+  block val = zero_block;
+  for (int i = 0; i < W; ++i)
+    if (getLSB(bits[i]))
+      val = val ^ ramzk_gf_base()[i];
+  return get_bool_backend()->f2k_wire(val, mac);
+}
+
+void test_f2k_mul(BoolIO *ios[threads], int party, int lg) {
+  long long n = 1LL << lg;
+  setup_zk_bool(ios[0], party);
+  auto *bb = get_bool_backend();
+
+  F2kAuthValue a = make_wire(2), b = make_wire(3);
+
+  // Warm up: the first f2k op lazily bootstraps the f2k VOLE; keep that
+  // one-time cost out of the timed loop.
+  F2kAuthValue w = a;
+  bb->f2k_mul(w, w, b);
+
+  auto start = clock_start();
+  for (long long i = 0; i < n; ++i)
+    bb->f2k_mul(a, a, b);
+  double t = time_from(start);
+
+  // finalize runs the f2k batch multiplication check — an abort here would
+  // mean the chain was computed wrong.
+  finalize_zk_bool();
+
+  cout << n << " f2k_mul\t" << t << " us\t"
+       << (double)n / (t / 1e6) / 1e6 << " M mult/s\tparty " << party << endl;
+}
+
+int main(int argc, char **argv) {
+  parse_party_and_port(argv, &party, &port);
+  BoolIO *ios[threads];
+  make_bool_ios(ios, party, port);
+
+  int lg = (argc >= 4) ? atoi(argv[3]) : 22;
+  test_f2k_mul(ios, party, lg);
+
+  destroy_bool_ios(ios);
+  return 0;
+}

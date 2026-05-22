@@ -17,6 +17,15 @@ public:
   }
 
   ~ZKBoolProver() override {
+    // Flush any leftover f2k batch first. f2k_check_manage is virtual and
+    // draws from the still-open Ferret session, so it must run in the
+    // subclass dtor (the base dtor only frees the f2k objects).
+    if (f2k_ready) {
+      if (f2k_check_cnt != 0)
+        f2k_check_manage();
+      f2k_polyprdt->batch_check();
+    }
+
     if (check_cnt != 0)
       andgate_correctness_check_manage();
 
@@ -73,17 +82,20 @@ private:
     }
   }
 
-  // Authenticated AND: compute s = a·b on cleartext, mask one COT pair to
-  // hold s, send the masking bit. Buffer the inputs+output for the eventual
-  // batch correctness check; trigger the check when the buffer fills.
+  // Authenticated AND: compute s = a·b on cleartext, mask the pre-drawn COT
+  // to hold s, send the masking bit. The fresh COT is read out of
+  // andgate_out_buffer (pre-filled in the ctor); the same slot is
+  // overwritten with the output MAC, buffering it alongside the inputs for
+  // the eventual batch correctness check. When the buffer fills, run the
+  // check then refill — so the COT recv is one burst per CHECK_SZ gates.
   block auth_compute_and(block a, block b) {
-    block auth;
     if (check_cnt == CHECK_SZ) {
       andgate_correctness_check_manage();
       check_cnt = 0;
+      ferret->next_n(andgate_out_buffer.data(), CHECK_SZ);
     }
 
-    ferret->next_n(&auth, 1);
+    block auth = andgate_out_buffer[check_cnt];   // pre-drawn fresh COT
     andgate_left_buffer[check_cnt]  = a;
     andgate_right_buffer[check_cnt] = b;
 
@@ -92,7 +104,7 @@ private:
     auth = with_lsb(auth, s);
     io->send_bit(d);
 
-    andgate_out_buffer[check_cnt] = auth;
+    andgate_out_buffer[check_cnt] = auth;          // overwrite with output MAC
     check_cnt++;
     return auth;
   }
@@ -111,24 +123,39 @@ private:
   void andgate_correctness_check(block *ret, int64_t task_n,
                                  block chi_seed) override {
     if (task_n == 0) return;
-    block *left    = andgate_left_buffer.data();
-    block *right   = andgate_right_buffer.data();
-    block *gateout = andgate_out_buffer.data();
+    const block *left    = andgate_left_buffer.data();
+    const block *right   = andgate_right_buffer.data();
+    const block *gateout = andgate_out_buffer.data();
 
-    for (int64_t i = 0; i < task_n; ++i) {
-      block A0, A1;
-      gfmul(left[i], right[i], &A0);
-      A1 = (getLSB(left[i])  ? right[i] : zero_block) ^
-           (getLSB(right[i]) ? left[i]  : zero_block) ^
-           gateout[i];
-      left[i]  = A0;
-      right[i] = A1;
+    // Fold the buffered triples into (ret[0], ret[1]) one cache-resident
+    // chunk at a time: per chunk derive its chi slice and form the per-gate
+    // coefficients (A0 = left*right; A1 the linear term, branchless via
+    // select_mask[lsb]). Avoids rewriting the multi-MB triple buffers and a
+    // task_n-sized chi array. Accumulate the *unreduced* 256-bit chi inner
+    // products across all chunks and reduce once at the end -- GF(2^128)
+    // reduction is linear over XOR, so this is bit-identical to one big
+    // reduced pass while paying one reduce per output instead of per chunk.
+    PRG prg(&chi_seed);
+    constexpr int64_t kChunk = 1024;
+    block chi[kChunk], A0[kChunk], A1[kChunk];
+    block acc0[2] = {zero_block, zero_block}, acc1[2] = {zero_block, zero_block};
+    for (int64_t base = 0; base < task_n; base += kChunk) {
+      const int64_t m = (task_n - base < kChunk) ? (task_n - base) : kChunk;
+      prg.random_block(chi, m);
+      for (int64_t i = 0; i < m; ++i) {
+        const block l = left[base + i], rt = right[base + i];
+        gfmul(l, rt, &A0[i]);
+        A1[i] = (select_mask[getLSB(l)]  & rt) ^
+                (select_mask[getLSB(rt)] & l)  ^ gateout[base + i];
+      }
+      block p[2];
+      vector_inn_prdt_sum_no_red(p, chi, A0, m);
+      acc0[0] = acc0[0] ^ p[0];  acc0[1] = acc0[1] ^ p[1];
+      vector_inn_prdt_sum_no_red(p, chi, A1, m);
+      acc1[0] = acc1[0] ^ p[0];  acc1[1] = acc1[1] ^ p[1];
     }
-
-    std::vector<block> chi(task_n);
-    uni_hash_coeff_gen(chi.data(), chi_seed, task_n);
-    vector_inn_prdt_sum_red(ret + 0, chi.data(), left,  task_n);
-    vector_inn_prdt_sum_red(ret + 1, chi.data(), right, task_n);
+    ret[0] = reduce(acc0[0], acc0[1]);
+    ret[1] = reduce(acc1[0], acc1[1]);
   }
 
   void andgate_correctness_aggregate(block *sum) override {
@@ -149,6 +176,103 @@ private:
     A_star[1] = A_star[1] ^ sum[1];
     io->send_data(A_star, 2 * sizeof(block));
   }
+
+  // ---- f2k wire ops (ALICE) -------------------------------------------
+
+  void f2k_add_const(F2kAuthValue &out, const F2kAuthValue &in,
+                     block c) override {
+    out.val = in.val ^ c;   // add c on the cleartext side; mac unchanged
+    out.mac = in.mac;
+  }
+
+  void f2k_mul(F2kAuthValue &out, const F2kAuthValue &a,
+               const F2kAuthValue &b) override {
+    f2k_init();
+    if (f2k_check_cnt == f2k_buffer_sz) {
+      f2k_check_manage();
+      f2k_check_cnt = 0;
+    }
+    if (f2k_authval_cnt == f2k_buffer_sz)
+      f2k_pre_buffer_refill();
+    f2k_left_val[f2k_check_cnt] = a.val;
+    f2k_left_mac[f2k_check_cnt] = a.mac;
+    f2k_rght_val[f2k_check_cnt] = b.val;
+    f2k_rght_mac[f2k_check_cnt] = b.mac;
+
+    // s = a·b on cleartext; mask the pre-drawn VOLE value to hold it, ship
+    // the masking difference d. mac is the VOLE mac for this gate output.
+    block valc, d;
+    gfmul(a.val, b.val, &valc);
+    d = valc ^ f2k_auth_buffer[f2k_authval_cnt].val;
+    f2k_auth_buffer[f2k_authval_cnt].val = valc;
+    io->send_data(&d, sizeof(block));
+    out.val = valc;
+    out.mac = f2k_auth_buffer[f2k_authval_cnt].mac;
+    f2k_check_cnt++;
+    f2k_authval_cnt++;
+  }
+
+  // Cleartext product of the N input values (the Δ^N coefficient that
+  // f2k_polyprdt leaves to the caller).
+  block f2k_mul_v(int64_t N, const block *vals) override {
+    block v = vals[0];
+    for (int64_t i = 1; i < N; ++i) gfmul(vals[i], v, &v);
+    return v;
+  }
+
+  void f2k_check_manage() override {
+    io->flush();
+    block seed = io->get_hash_block();
+    block sum[2] = { zero_block, zero_block };
+    f2k_check(sum, f2k_check_cnt, seed);
+
+    block ope_data[128];
+    ferret->next_n(ope_data, 128);
+    uint64_t ch_bits[2];
+    for (int i = 0; i < 2; ++i) {
+      ch_bits[i] = getLSB(ope_data[64 * i + 63]) ? 1 : 0;
+      for (int j = 62; j >= 0; --j) {
+        ch_bits[i] <<= 1;
+        if (getLSB(ope_data[64 * i + j])) ch_bits[i]++;
+      }
+    }
+    block A_star[2];
+    A_star[1] = makeBlock(ch_bits[1], ch_bits[0]);
+    pack.packing(A_star, ope_data);
+    A_star[0] = A_star[0] ^ sum[0];
+    A_star[1] = A_star[1] ^ sum[1];
+    io->send_data(A_star, 2 * sizeof(block));
+    io->flush();
+  }
+
+ private:
+  // Fold the buffered f2k multiplication triples into (Δ⁰, Δ¹) check
+  // coefficients (A0 = ma·mb, A1 the linear term + the output mac), then
+  // chi-reduce. left/right val buffers are reused as scratch.
+  void f2k_check(block *ret, int64_t task_n, block chi_seed) {
+    if (task_n == 0) return;
+    block *lval = f2k_left_val.data();
+    block *lmac = f2k_left_mac.data();
+    block *rval = f2k_rght_val.data();
+    block *rmac = f2k_rght_mac.data();
+    const int64_t omac_base = f2k_authval_cnt - f2k_check_cnt;
+    for (int64_t i = 0; i < task_n; ++i) {
+      block A0, A1, tmp;
+      gfmul(lmac[i], rmac[i], &A0);
+      gfmul(lval[i], rmac[i], &tmp);
+      gfmul(rval[i], lmac[i], &A1);
+      A1 = A1 ^ tmp;
+      A1 = A1 ^ f2k_auth_buffer[omac_base + i].mac;
+      lval[i] = A0;
+      rval[i] = A1;
+    }
+    std::vector<block> chi(task_n);
+    PRG(&chi_seed).random_block(chi.data(), task_n);
+    vector_inn_prdt_sum_red(ret + 0, chi.data(), lval, task_n);
+    vector_inn_prdt_sum_red(ret + 1, chi.data(), rval, task_n);
+  }
+
+ public:
 };
 
 inline ZKBoolProver *get_bool_backend_prv() {

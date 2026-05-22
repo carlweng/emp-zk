@@ -4,6 +4,9 @@
 #include "emp-zk/emp-zk-bool/ram-zk/gf_base.h"
 #include "emp-zk/emp-zk-bool/ram-zk/ostriple.h"
 
+namespace emp {
+using namespace std;
+
 template <typename IO> class ZKRamExt {
 public:
   const std::size_t index_bit_sz = 32;
@@ -357,4 +360,6 @@ public:
     // check2 += time_from(t1);
   }
 };
+}  // namespace emp
+
 #endif // EMP_ZK_RAM_EXT_H__

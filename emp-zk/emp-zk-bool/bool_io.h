@@ -3,6 +3,7 @@
 #include "emp-tool/emp-tool.h"
 
 namespace emp {
+using namespace std;
 // Bit-level IOChannel adapter for emp-zk-bool. De-templated alongside
 // emp-tool main's switch from CRTP IOChannel<T> to a polymorphic
 // virtual base — `io` is now an IOChannel*, send/recv go through

@@ -6,6 +6,7 @@
 // Included from zk_bool.h.
 
 namespace emp {
+using namespace std;
 
 class ZKBoolVerifier : public ZKBoolBase {
 public:
@@ -68,7 +69,7 @@ private:
   // Authenticated-bit input: receive the prover's masking flips, fold them
   // into the COT keys to recover the per-bit MAC structure.
   void authenticated_bits_input(block *auth, const bool *in, int64_t len) {
-    ferret->rcot(auth, len);
+    ferret->next_n(auth, len);
     for (int64_t i = 0; i < len; ++i) {
       bool buff = io->recv_bit();
       auth[i] = clear_lsb(xor_delta_if(auth[i], buff));
@@ -84,7 +85,7 @@ private:
       check_cnt = 0;
     }
 
-    ferret->rcot(&auth, 1);
+    ferret->next_n(&auth, 1);
     andgate_left_buffer[check_cnt]  = a;
     andgate_right_buffer[check_cnt] = b;
 
@@ -134,7 +135,7 @@ private:
 
   void andgate_correctness_aggregate(block *sum) override {
     block ope_data[128];
-    ferret->rcot(ope_data, 128);
+    ferret->next_n(ope_data, 128);
     block B_star;
     pack.packing(&B_star, ope_data);
     B_star = B_star ^ sum[0];

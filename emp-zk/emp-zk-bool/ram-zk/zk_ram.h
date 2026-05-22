@@ -4,6 +4,9 @@
 #include "emp-zk/emp-zk-bool/ram-zk/gf_base.h"
 #include "emp-zk/emp-zk-bool/ram-zk/ostriple.h"
 
+namespace emp {
+using namespace std;
+
 template <typename IO> class ZKRam {
 public:
   uint64_t capacity = 1, step = 0;
@@ -349,4 +352,6 @@ public:
     }
   }
 };
+}  // namespace emp
+
 #endif // EMP_ZK_RAM_H__

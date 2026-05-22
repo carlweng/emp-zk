@@ -1,5 +1,6 @@
 #include "emp-tool/emp-tool.h"
-#include "emp-zk/emp-svole/emp-svole.h"
+#include "emp-ot/emp-ot.h"
+#include "emp-ot/svole/fp_base_svole.h"
 
 using namespace emp;
 using namespace std;
@@ -31,7 +32,7 @@ void check_triple(NetIO *io, uint64_t delta, AV *pairs, int size) {
 }
 
 void test_lpn(NetIO *io, int party) {
-  Base_svole<AuthValueFp, NetIO> *svole;
+  Base_svole<AuthValueFp> *svole;
 
   PRG prg;
   uint64_t Delta;
@@ -46,11 +47,11 @@ void test_lpn(NetIO *io, int party) {
   AV *pre  = new AV[test_k];
 
   if (party == ALICE) {
-    svole = new Base_svole<AuthValueFp, NetIO>(party, io, (__uint128_t)Delta);
+    svole = new Base_svole<AuthValueFp>(party, io, zero_block, (__uint128_t)Delta);
     svole->triple_gen_send(out, test_n);
     svole->triple_gen_send(pre, test_k);
   } else {
-    svole = new Base_svole<AuthValueFp, NetIO>(party, io);
+    svole = new Base_svole<AuthValueFp>(party, io, zero_block);
     svole->triple_gen_recv(out, test_n);
     svole->triple_gen_recv(pre, test_k);
   }

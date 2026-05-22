@@ -3,6 +3,9 @@
 
 #include "emp-tool/emp-tool.h"
 
+namespace emp {
+using namespace std;
+
 #define MAC_CHECK_BUFFER_SZ 8192
 
 template <typename IO> class FpAuthHelper {
@@ -36,4 +39,6 @@ public:
     }
   }
 };
+}  // namespace emp
+
 #endif

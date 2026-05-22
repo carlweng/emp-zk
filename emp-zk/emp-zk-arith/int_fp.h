@@ -8,6 +8,9 @@
 #include "emp-zk/emp-zk-arith/zk_fp_exec_verifier.h"
 #include "emp-zk/emp-zk-bool/emp-zk-bool.h"
 
+namespace emp {
+using namespace std;
+
 class IntFp {
 public:
   __uint128_t value;
@@ -93,4 +96,6 @@ inline void fp_zkp_inner_prdt(IntFp *x, IntFp *y, uint64_t constant, int64_t len
   FpPolyProof<IO>::fppolyproof->zkp_inner_prdt((__uint128_t *)x,
                                                (__uint128_t *)y, constant, len);
 }
+}  // namespace emp
+
 #endif

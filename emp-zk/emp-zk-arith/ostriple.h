@@ -1,8 +1,11 @@
 #ifndef FP_OS_TRIPLE_H__
 #define FP_OS_TRIPLE_H__
 
-#include "emp-zk/emp-svole/emp-svole.h"
+#include "emp-ot/emp-ot.h"
 #include "emp-zk/emp-zk-arith/triple_auth.h"
+
+namespace emp {
+using namespace std;
 
 // Bit-position helpers (layout-agnostic).
 #define LOW64(x) _mm_extract_epi64((block)x, 0)
@@ -32,7 +35,7 @@ public:
   IO *io;
   IO **ios;
   PRG prg;
-  FpVOLE<AuthValueFp, IO> *vole = nullptr;
+  FpVOLE<AuthValueFp> *vole = nullptr;
   FpAuthHelper<IO> *auth_helper = nullptr;
   ThreadPool *pool = nullptr;
 
@@ -46,14 +49,20 @@ public:
     pool = new ThreadPool(threads);
 
     if (party == BOB) delta_gen();
-    vole = new FpVOLE<AuthValueFp, IO>(3 - party, ios[0]);
+    vole = new FpVOLE<AuthValueFp>(3 - party, ios[0]);
     if (party == BOB) vole->set_delta((uint64_t)delta);
+    // One persistent sVOLE session for the whole proof; authenticated
+    // values are drawn via vole->next_n() (the EdaBits / FpPolyProof
+    // gadgets borrow this same vole). Amortizes the per-round end-work
+    // instead of paying it per draw as repeated run(_, 1) did. Closed in
+    // the destructor, after those borrowers have been torn down.
+    vole->begin();
 
     andgate_out_buffer.resize(CHECK_SZ);
     andgate_left_buffer.resize(CHECK_SZ);
     andgate_right_buffer.resize(CHECK_SZ);
     __uint128_t tmp;
-    vole->run((AuthValueFp *)&tmp, 1);
+    vole->next_n((AuthValueFp *)&tmp, 1);
 
     auth_helper = new FpAuthHelper<IO>(party, io);
   }
@@ -63,6 +72,7 @@ public:
       andgate_correctness_check_manage();
     auth_helper->flush();
     delete auth_helper;
+    vole->end();        // close the persistent sVOLE session (borrowers already gone)
     delete vole;
   }
   /* ---------------------inputs----------------------*/
@@ -72,7 +82,7 @@ public:
    */
   __uint128_t authenticated_val_input(uint64_t w) {
     __uint128_t mac;
-    vole->run((AuthValueFp *)&mac, 1);
+    vole->next_n((AuthValueFp *)&mac, 1);
 
     uint64_t lam = PR - w;
     lam = add_mod(VAL(mac), lam);
@@ -82,7 +92,7 @@ public:
 
   void authenticated_val_input(__uint128_t *label, const uint64_t *w, int64_t len) {
     std::vector<uint64_t> lam(len);
-    vole->run((AuthValueFp *)label, len);
+    vole->next_n((AuthValueFp *)label, len);
 
     for (int64_t i = 0; i < len; ++i) {
       lam[i] = PR - w[i];
@@ -94,7 +104,7 @@ public:
 
   __uint128_t authenticated_val_input() {
     __uint128_t key;
-    vole->run((AuthValueFp *)&key, 1);
+    vole->next_n((AuthValueFp *)&key, 1);
 
     uint64_t lam;
     io->recv_data(&lam, sizeof(uint64_t));
@@ -107,7 +117,7 @@ public:
 
   void authenticated_val_input(__uint128_t *label, int64_t len) {
     std::vector<uint64_t> lam(len);
-    vole->run((AuthValueFp *)label, len);
+    vole->next_n((AuthValueFp *)label, len);
 
     io->recv_data(lam.data(), len * sizeof(uint64_t));
 
@@ -126,7 +136,7 @@ public:
       andgate_correctness_check_manage();
       check_cnt = 0;
     }
-    vole->run((AuthValueFp *)&mac, 1);
+    vole->next_n((AuthValueFp *)&mac, 1);
     andgate_left_buffer[check_cnt] = Ma;
     andgate_right_buffer[check_cnt] = Mb;
 
@@ -148,7 +158,7 @@ public:
       andgate_correctness_check_manage();
       check_cnt = 0;
     }
-    vole->run((AuthValueFp *)&key, 1);
+    vole->next_n((AuthValueFp *)&key, 1);
     andgate_left_buffer[check_cnt] = Ka;
     andgate_right_buffer[check_cnt] = Kb;
 
@@ -222,7 +232,7 @@ public:
 
     if (party == ALICE) {
       __uint128_t ope_data;
-      vole->run((AuthValueFp *)&ope_data, 1);
+      vole->next_n((AuthValueFp *)&ope_data, 1);
       uint64_t A0_star = MAC(ope_data);
       uint64_t A1_star = VAL(ope_data);
       uint64_t check_sum[2];
@@ -231,7 +241,7 @@ public:
       io->send_data(check_sum, 2 * sizeof(uint64_t));
     } else {
       __uint128_t ope_data;
-      vole->run((AuthValueFp *)&ope_data, 1);
+      vole->next_n((AuthValueFp *)&ope_data, 1);
       uint64_t B_star = MAC(ope_data);
       W = add_mod(W, B_star);
       uint64_t check_sum[2];
@@ -354,13 +364,13 @@ public:
 
   // sender
   void refill_send(__uint128_t *yz, int64_t *cnt, int64_t sz) {
-    vole->run((AuthValueFp *)yz, sz);
+    vole->next_n((AuthValueFp *)yz, sz);
     *cnt = 0;
   }
 
   // recver
   void refill_recv(__uint128_t *yz, int64_t *cnt, int64_t sz) {
-    vole->run((AuthValueFp *)yz, sz);
+    vole->next_n((AuthValueFp *)yz, sz);
     *cnt = 0;
   }
 
@@ -517,4 +527,6 @@ public:
     }
   }
 };
+}  // namespace emp
+
 #endif

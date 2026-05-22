@@ -35,7 +35,7 @@ void test_base_svole(NetIO *io, int party) {
   int test_n = 1024;
   std::vector<AV> pairs(test_n);
 
-  Base_svole<AuthValueFp, NetIO> *svole;
+  Base_svole<AuthValueFp> *svole;
 
   uint64_t Delta = 0;
   if (party == ALICE) {
@@ -43,9 +43,9 @@ void test_base_svole(NetIO *io, int party) {
     prg.random_data_unaligned(&Delta, sizeof(uint64_t));
     Delta = mod(Delta);
     if (Delta == 0) Delta = 1;
-    svole = new Base_svole<AuthValueFp, NetIO>(party, io, (__uint128_t)Delta);
+    svole = new Base_svole<AuthValueFp>(party, io, zero_block, (__uint128_t)Delta);
   } else {
-    svole = new Base_svole<AuthValueFp, NetIO>(party, io);
+    svole = new Base_svole<AuthValueFp>(party, io, zero_block);
   }
 
   auto start = clock_start();

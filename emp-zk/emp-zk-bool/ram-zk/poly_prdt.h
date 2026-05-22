@@ -3,6 +3,9 @@
 
 #include "emp-ot/emp-ot.h"
 
+namespace emp {
+using namespace std;
+
 template <typename IO> class RamPolyPrdt {
 public:
   int party;
@@ -154,4 +157,6 @@ public:
     num++;
   }
 };
+}  // namespace emp
+
 #endif

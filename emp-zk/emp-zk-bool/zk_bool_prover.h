@@ -6,6 +6,7 @@
 // Included from zk_bool.h.
 
 namespace emp {
+using namespace std;
 
 class ZKBoolProver : public ZKBoolBase {
 public:
@@ -64,7 +65,7 @@ private:
   // Authenticated-bit input: receive a fresh COT pair, embed the cleartext
   // bit in the LSB, send the masking flip to BOB.
   void authenticated_bits_input(block *auth, const bool *in, int64_t len) {
-    ferret->rcot(auth, len);
+    ferret->next_n(auth, len);
     for (int64_t i = 0; i < len; ++i) {
       bool buff = getLSB(auth[i]) ^ in[i];
       auth[i] = with_lsb(auth[i], in[i]);
@@ -82,7 +83,7 @@ private:
       check_cnt = 0;
     }
 
-    ferret->rcot(&auth, 1);
+    ferret->next_n(&auth, 1);
     andgate_left_buffer[check_cnt]  = a;
     andgate_right_buffer[check_cnt] = b;
 
@@ -132,7 +133,7 @@ private:
 
   void andgate_correctness_aggregate(block *sum) override {
     block ope_data[128];
-    ferret->rcot(ope_data, 128);
+    ferret->next_n(ope_data, 128);
     uint64_t ch_bits[2];
     for (int i = 0; i < 2; ++i) {
       ch_bits[i] = getLSB(ope_data[64 * i + 63]) ? 1 : 0;

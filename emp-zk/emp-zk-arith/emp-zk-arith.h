@@ -10,6 +10,9 @@
 #include "emp-zk/emp-zk-arith/zk_fp_exec_verifier.h"
 #include "emp-zk/emp-zk-bool/zk_bool_base.h"
 
+namespace emp {
+using namespace std;
+
 template <typename IO>
 inline void setup_zk_arith(IO **ios, int threads, int party,
                            bool enable_conversion = false) {
@@ -49,4 +52,6 @@ template <typename IO> inline void finalize_zk_arith() {
   delete FpPolyProof<IO>::fppolyproof;
   delete ZKFpExec::zk_exec;
 }
+}  // namespace emp
+
 #endif

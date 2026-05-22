@@ -12,6 +12,7 @@
 #include "emp-tool/emp-tool.h"
 
 namespace emp {
+using namespace std;
 
 inline const block *ramzk_gf_base() {
   struct Init {

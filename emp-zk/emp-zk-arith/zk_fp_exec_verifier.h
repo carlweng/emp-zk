@@ -2,6 +2,9 @@
 #define ZK_FP_EXECUTIION_VERIFIER_H__
 #include "emp-zk/emp-zk-arith/zk_fp_exec.h"
 
+namespace emp {
+using namespace std;
+
 template <typename IO> class ZKFpExecVer : public ZKFpExec {
 public:
   FpOSTriple<IO> *ostriple;
@@ -76,4 +79,6 @@ public:
     return ((__uint128_t)mac) << 64;
   }
 };
+}  // namespace emp
+
 #endif

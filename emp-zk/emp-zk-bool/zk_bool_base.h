@@ -28,6 +28,7 @@
 #include "emp-zk/emp-zk-bool/polynomial.h"
 
 namespace emp {
+using namespace std;
 
 class ZKBoolBase : public Backend {
 public:
@@ -62,7 +63,12 @@ public:
     // single IOChannel (post-unification with the other OT extensions).
     IOChannel *iochan = reinterpret_cast<IOChannel *>(io_);
     ferret = new Ferret(3 - p, iochan, /*malicious=*/true);
-    delta = ferret->Delta;           // Δ sampled in Ferret's ctor; bootstrap fires lazily on first rcot call
+    delta = ferret->Delta;           // Δ sampled in Ferret's ctor
+    // Open one persistent Ferret streaming session for the whole proof;
+    // all COTs are drawn via ferret->next_n(). This amortizes Ferret's
+    // per-round end-work over the entire proof instead of paying it per
+    // chunk (as repeated one-shot rcot() did). Closed in the destructor.
+    ferret->begin();
 
     andgate_out_buffer.resize(CHECK_SZ);
     andgate_left_buffer.resize(CHECK_SZ);
@@ -83,7 +89,8 @@ public:
   }
 
   ~ZKBoolBase() override {
-    delete polyproof;
+    delete polyproof;   // PolyProof::batch_check draws COTs via next_n — session still open
+    ferret->end();      // close the persistent streaming session (final round + chi-fold check)
     delete ferret;
   }
 

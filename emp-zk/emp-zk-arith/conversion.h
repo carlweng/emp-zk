@@ -4,6 +4,9 @@
 #include "emp-zk/emp-zk-arith/int_fp.h"
 #include "emp-zk/emp-zk-bool/emp-zk-bool.h"
 
+namespace emp {
+using namespace std;
+
 template <typename IO> inline IntFp bool2arith(Integer &x) {
   IntFp y;
   y.value = EdaBits<IO>::conv->bool2arith(x);
@@ -21,3 +24,5 @@ template <typename IO> inline Integer arith2bool(IntFp &x) {
 template <typename IO> inline void arith2bool(Integer *y, IntFp *x, int64_t sz) {
   EdaBits<IO>::conv->arith2bool(y, (__uint128_t *)x, sz);
 }
+
+}  // namespace emp

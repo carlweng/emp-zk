@@ -7,8 +7,10 @@
 #include "emp-ot/emp-ot.h"
 #include "emp-tool/emp-tool.h"
 #include "emp-zk/emp-zk-arith/edabit/doub_auth_helper.h"
-#include "emp-zk/emp-svole/emp-svole.h"
 #include "emp-zk/emp-zk-bool/emp-zk-bool.h"
+
+namespace emp {
+using namespace std;
 
 // AuthValue accessors (val-first: val in low 64, mac in high 64).
 #define VAL(x) _mm_extract_epi64((block)x, 0)
@@ -27,7 +29,7 @@ public:
   __uint128_t delta_fp;
   std::vector<__uint128_t> arith_candidate;
 
-  FpVOLE<AuthValueFp, IO> *cot_fp = nullptr;
+  FpVOLE<AuthValueFp> *cot_fp = nullptr;
 
   DoubAuthHelper<IO> *auth_helper = nullptr;
 
@@ -43,7 +45,7 @@ public:
 
   Integer int_boo_pr, int_boo_zero, int_boo_pr_plus_two;
 
-  EdaBits(int party, int threads, IO **ios, FpVOLE<AuthValueFp, IO> *cot_fp) {
+  EdaBits(int party, int threads, IO **ios, FpVOLE<AuthValueFp> *cot_fp) {
     this->party = party;
     this->ios = ios;
     this->cot_fp = cot_fp;
@@ -58,7 +60,7 @@ public:
     this->rand_pt = 0;
     this->edabit_num = 0;
     arith_candidate.resize(cot_fp->chunk_aligned_buf_sz());
-    cot_fp->run((AuthValueFp *)arith_candidate.data(), cot_fp->chunk_aligned_buf_sz());
+    cot_fp->next_n((AuthValueFp *)arith_candidate.data(), cot_fp->chunk_aligned_buf_sz());
 
     this->ell = B * N + C; // batch size
     this->ell_faulty = ell - N;
@@ -88,7 +90,7 @@ public:
     // auto start = clock_start();
     //  If the buffer is used up, refill the Fp shares
     if (np_pt + ell > np_sz) {
-      cot_fp->run((AuthValueFp *)arith_candidate.data(), cot_fp->chunk_aligned_buf_sz());
+      cot_fp->next_n((AuthValueFp *)arith_candidate.data(), cot_fp->chunk_aligned_buf_sz());
       np_pt = 0;
     }
     np_rg = np_pt + ell;
@@ -343,4 +345,6 @@ public:
   }
 };
 template <typename IO> EdaBits<IO> *EdaBits<IO>::conv = nullptr;
+}  // namespace emp
+
 #endif

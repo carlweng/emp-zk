@@ -1,9 +1,12 @@
 #ifndef ZK_FP_EXECUTION_H__
 #define ZK_FP_EXECUTION_H__
 
-#include "emp-zk/emp-svole/emp-svole.h"
+#include "emp-ot/emp-ot.h"
 #include "emp-zk/emp-zk-arith/ostriple.h"
 #include "emp-zk/emp-zk-arith/edabit/edabits.h"
+
+namespace emp {
+using namespace std;
 
 class ZKFpExec {
 public:
@@ -38,4 +41,6 @@ public:
 };
 
 // ZKFpExec * ZKFpExec::zk_exec = nullptr;
+}  // namespace emp
+
 #endif

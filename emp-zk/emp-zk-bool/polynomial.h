@@ -5,6 +5,7 @@
 #include "emp-tool/emp-tool.h"
 
 namespace emp {
+using namespace std;
 
 // emp-tool main spells the v0.3.x `Integer` as `SignedInt` (template
 // alias `using Integer = SignedInt;` lives in emp-sh2pc's umbrella).
@@ -48,7 +49,7 @@ public:
 
       vector_inn_prdt_sum_red(check_sum, chi.data(), buffer.data(), num);
       vector_inn_prdt_sum_red(check_sum + 1, chi.data(), buffer1.data(), num);
-      ferret->rcot(ope_data, 128);
+      ferret->next_n(ope_data, 128);
       block tmp;
       pack.packing(&tmp, ope_data);
       uint64_t choice_bits[2];
@@ -74,7 +75,7 @@ public:
       uni_hash_coeff_gen(chi.data(), seed, num > 4 ? num : 4);
       block B;
       vector_inn_prdt_sum_red(&B, chi.data(), buffer.data(), num);
-      ferret->rcot(ope_data, 128);
+      ferret->next_n(ope_data, 128);
       block tmp;
       pack.packing(&tmp, ope_data);
 

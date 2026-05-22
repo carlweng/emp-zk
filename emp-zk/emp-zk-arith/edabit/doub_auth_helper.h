@@ -5,6 +5,9 @@
 
 #include "emp-tool/emp-tool.h"
 
+namespace emp {
+using namespace std;
+
 using namespace emp;
 using Integer = SignedInt;
 
@@ -124,4 +127,6 @@ public:
 
   bool triple_equality_check() { return equality_check(&hash); }
 };
+}  // namespace emp
+
 #endif

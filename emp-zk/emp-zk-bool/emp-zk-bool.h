@@ -4,6 +4,7 @@
 #include "emp-zk/emp-zk-bool/zk_bool_base.h"
 
 namespace emp {
+using namespace std;
 
 inline void setup_zk_bool(BoolIO *io, int party) {
   if (party == ALICE)

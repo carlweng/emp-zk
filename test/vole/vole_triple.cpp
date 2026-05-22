@@ -38,7 +38,7 @@ void check_triple(NetIO *io, uint64_t delta,
 }
 
 void test_vole_triple(NetIO *ios[threads + 1], int party) {
-  FpVOLE<AuthValueFp, NetIO> vtriple(party, ios[0]);
+  FpVOLE<AuthValueFp> vtriple(party, ios[0]);
   uint64_t Delta = 0;
   if (party == ALICE) {
     PRG prg;

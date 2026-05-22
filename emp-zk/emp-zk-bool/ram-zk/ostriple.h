@@ -4,6 +4,9 @@
 #include "emp-ot/svole/f2k_vole.h"
 #include "emp-zk/emp-zk-bool/ram-zk/poly_prdt.h"
 
+namespace emp {
+using namespace std;
+
 // =====================================================================
 // Authenticated triple stream backing emp-zk-ram. Mirrors the
 // ZKBoolBase / ZKBoolProver / ZKBoolVerifier split in emp-zk-bool:
@@ -29,7 +32,7 @@ public:
   IO *io;
   PRG prg;
   Ferret *ferret = nullptr;
-  F2kVOLE<AuthValueF2k, IO> *svole = nullptr;
+  F2kVOLE<AuthValueF2k> *svole = nullptr;
   RamPolyPrdt<IO> *polyprdt = nullptr;
 
   int64_t BUFFER_SZ = -1;
@@ -45,7 +48,7 @@ public:
     // refill — wildly over what the RAM workloads consume. The smaller
     // ferret_b10 (~870K) keeps the Ferret bootstrap from dominating
     // debug-mode test time without changing protocol semantics.
-    svole = new F2kVOLE<AuthValueF2k, IO>(party, io, /*malicious=*/true,
+    svole = new F2kVOLE<AuthValueF2k>(party, io, /*malicious=*/true,
                                           tuning::ferret_b10);
     // Pin the svole's Δ to the shared Ferret's Δ; otherwise svole auths
     // and zk_bool auths would live under different Δs, breaking the
@@ -226,7 +229,7 @@ public:
     andgate_correctness_check_alice(sum, check_cnt, seed);
 
     block ope_data[128];
-    ferret->rcot(ope_data, 128);
+    ferret->next_n(ope_data, 128);
     uint64_t ch_bits[2];
     for (int i = 0; i < 2; ++i) {
       ch_bits[i] = getLSB(ope_data[64 * i + 63]) ? 1 : 0;
@@ -347,7 +350,7 @@ public:
     andgate_correctness_check_bob(sum, check_cnt, seed);
 
     block ope_data[128];
-    ferret->rcot(ope_data, 128);
+    ferret->next_n(ope_data, 128);
     block B_star;
     pack.packing(&B_star, ope_data);
     B_star = B_star ^ sum[0];
@@ -383,5 +386,7 @@ private:
     vector_inn_prdt_sum_red(ret + 0, chi.data(), lval, task_n);
   }
 };
+
+}  // namespace emp
 
 #endif

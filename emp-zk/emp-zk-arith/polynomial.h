@@ -5,6 +5,9 @@
 #include "emp-zk/emp-zk-arith/ostriple.h"
 #include "emp-zk/emp-zk-bool/emp-zk-bool.h"
 
+namespace emp {
+using namespace std;
+
 template <typename IO> class FpPolyProof {
 public:
   static FpPolyProof<IO> *fppolyproof;
@@ -47,7 +50,7 @@ public:
 
       check_sum[0] = vector_inn_prdt_sum_red(chi.data(), buffer.data(), num);
       check_sum[1] = vector_inn_prdt_sum_red(chi.data(), buffer1.data(), num);
-      ostriple->vole->run((AuthValueFp *)&ope_data, 1);
+      ostriple->vole->next_n((AuthValueFp *)&ope_data, 1);
 
       check_sum[0] = add_mod(check_sum[0], MAC(ope_data));
       check_sum[1] = add_mod(check_sum[1], VAL(ope_data));
@@ -60,7 +63,7 @@ public:
 
       uni_hash_coeff_gen(chi.data(), seed, num);
       uint64_t B = vector_inn_prdt_sum_red(chi.data(), buffer.data(), num);
-      ostriple->vole->run((AuthValueFp *)&ope_data, 1);
+      ostriple->vole->next_n((AuthValueFp *)&ope_data, 1);
       B = add_mod(B, MAC(ope_data));
       io->recv_data(check_sum, 2 * sizeof(uint64_t));
 
@@ -150,4 +153,6 @@ public:
   }
 };
 template <typename IO> FpPolyProof<IO> *FpPolyProof<IO>::fppolyproof = nullptr;
+}  // namespace emp
+
 #endif

@@ -4,6 +4,9 @@
 #include "emp-zk/emp-zk-bool/ram-zk/gf_base.h"
 #include "emp-zk/emp-zk-bool/ram-zk/ostriple.h"
 
+namespace emp {
+using namespace std;
+
 template <typename IO> class ZKRamRO {
 public:
   double check1 = 0, check2 = 0, check3 = 0;
@@ -243,4 +246,6 @@ public:
     }
   }
 };
+}  // namespace emp
+
 #endif // EMP_ZK_RAM_RO_H__

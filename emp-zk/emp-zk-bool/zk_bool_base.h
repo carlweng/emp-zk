@@ -64,6 +64,12 @@ public:
   std::vector<AuthValueF2k> f2k_auth_buffer;       // pre-drawn VOLE values
   std::vector<block> f2k_left_val, f2k_left_mac;
   std::vector<block> f2k_rght_val, f2k_rght_mac;
+  // Dedicated VOLE buffer for f2k_input (committing a cleartext field
+  // element). Kept separate from the mul buffer so f2k_check's omac_base
+  // bookkeeping — which assumes the last check_cnt VOLE draws are all mul
+  // outputs — stays undisturbed. Filled lazily, refilled when exhausted.
+  std::vector<AuthValueF2k> f2k_in_buffer;
+  int64_t f2k_in_cnt = 0;
 
   GaloisFieldPacking pack;
   BoolIO  *io  = nullptr;
@@ -206,8 +212,34 @@ public:
     f2k_left_mac.resize(f2k_buffer_sz);
     f2k_rght_val.resize(f2k_buffer_sz);
     f2k_rght_mac.resize(f2k_buffer_sz);
+    f2k_in_buffer.resize(f2k_buffer_sz);
+    f2k_in_cnt = f2k_buffer_sz;        // sentinel: refill on first f2k_input
     f2k_ready = true;
     f2k_pre_buffer_refill();
+  }
+
+  // Commit a cleartext F(2^128) value as an authenticated wire (the f2k
+  // analogue of authenticated-bit input). `v` is the cleartext on the
+  // prover; the verifier's `v` argument is ignored and its returned val
+  // lane is zero. Draws a fresh VOLE pair from the dedicated input buffer
+  // and ships the masking difference so the wire carries `v` under the
+  // shared Δ: mac_A == key_B ^ v·Δ. Party-agnostic signature.
+  F2kAuthValue f2k_input(block v) {
+    f2k_init();
+    if (f2k_in_cnt == f2k_buffer_sz) {
+      f2k_vole->run(f2k_in_buffer.data(), f2k_buffer_sz);
+      f2k_in_cnt = 0;
+    }
+    AuthValueF2k r = f2k_in_buffer[f2k_in_cnt++];
+    if (party == ALICE) {
+      block diff = v ^ r.val;
+      io->send_data(&diff, sizeof(block));
+      return AuthValueF2k{ v, r.mac };
+    }
+    block diff;
+    io->recv_data(&diff, sizeof(block));
+    gfmul(delta, diff, &diff);
+    return AuthValueF2k{ zero_block, r.mac ^ diff };
   }
 
   // Bulk-refill the pre-drawn VOLE buffer (one chunk-aligned run, so no

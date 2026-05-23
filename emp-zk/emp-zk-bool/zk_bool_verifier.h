@@ -24,11 +24,8 @@ public:
 
   ~ZKBoolVerifier() override {
     // Flush any leftover f2k batch first (see ZKBoolProver dtor).
-    if (f2k_ready) {
-      if (f2k_check_cnt != 0)
-        f2k_check_manage();
-      f2k_polyprdt->batch_check();
-    }
+    if (f2k_ready && f2k_check_cnt != 0)
+      f2k_check_manage();
 
     if (check_cnt != 0)
       andgate_correctness_check_manage();

@@ -20,11 +20,8 @@ public:
     // Flush any leftover f2k batch first. f2k_check_manage is virtual and
     // draws from the still-open Ferret session, so it must run in the
     // subclass dtor (the base dtor only frees the f2k objects).
-    if (f2k_ready) {
-      if (f2k_check_cnt != 0)
-        f2k_check_manage();
-      f2k_polyprdt->batch_check();
-    }
+    if (f2k_ready && f2k_check_cnt != 0)
+      f2k_check_manage();
 
     if (check_cnt != 0)
       andgate_correctness_check_manage();
@@ -212,8 +209,8 @@ private:
     f2k_authval_cnt++;
   }
 
-  // Cleartext product of the N input values (the Δ^N coefficient that
-  // f2k_polyprdt leaves to the caller).
+  // Cleartext product of the N input values (the Δ^N coefficient that the
+  // degree-N product proof leaves to the caller).
   block f2k_mul_v(int64_t N, const block *vals) override {
     block v = vals[0];
     for (int64_t i = 1; i < N; ++i) gfmul(vals[i], v, &v);

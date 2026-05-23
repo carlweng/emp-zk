@@ -4,6 +4,7 @@
 #include <bitset>
 
 #include "emp-tool/emp-tool.h"
+#include "emp-zk/emp-zk-bool/bool_io.h"
 
 namespace emp {
 using namespace std;
@@ -15,15 +16,15 @@ using Integer = SignedInt;
 #define VAL(x) _mm_extract_epi64((block)x, 0)
 #define MAC(x) _mm_extract_epi64((block)x, 1)
 
-template <typename IO> class DoubAuthHelper {
+class DoubAuthHelper {
 public:
   int party;
-  IO *io;
+  BoolIO *io;
   Hash hash;
   block delta_f2;
   __uint128_t delta_fp;
 
-  DoubAuthHelper(int party, IO *io) {
+  DoubAuthHelper(int party, BoolIO *io) {
     this->party = party;
     this->io = io;
   }

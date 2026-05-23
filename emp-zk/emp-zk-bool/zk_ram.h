@@ -1,8 +1,7 @@
 #ifndef EMP_ZK_RAM_H__
 #define EMP_ZK_RAM_H__
 
-#include "emp-zk/emp-zk-bool/ram-zk/zk_ram_pack.h"
-#include "emp-zk/emp-zk-bool/ram-zk/zk_set.h"
+#include "emp-zk/emp-zk-bool/zk_set.h"
 #include "emp-zk/emp-zk-bool/zk_perm_proof.h"
 
 namespace emp {
@@ -31,7 +30,7 @@ using namespace std;
 // mode the freshness set {1, …, T}. Operation type is public, so no
 // multiplexer multiplication is needed (Fig. 9's op·(w−old) term).
 // Usage: init() once, read()/write() up to T times, check() once.
-template <typename IO> class ZKRam {
+class ZKRam {
 public:
   int party;
   bool read_only;
@@ -43,7 +42,7 @@ public:
   vector<uint64_t> last_t;         // ALICE: time of last write per cell
   ZKBoolBase *bb;
   ZKPermProof perm;                // shuffle 1: reads ∼ writes
-  ZKSet<IO> *diffs = nullptr;      // shuffle 2 (read/write only): clock−t in {1..T}
+  ZKSet *diffs = nullptr;      // shuffle 2 (read/write only): clock−t in {1..T}
   vector<F2kAuthValue> elem_;
 
   ZKRam(int party, int64_t index_sz, int64_t val_sz, int64_t T,
@@ -52,7 +51,7 @@ public:
         T(T), time_sz(ramzk_bits_for(T)), bb(get_bool_backend()),
         perm(index_sz + val_sz + time_sz) {
     if (!read_only)
-      diffs = new ZKSet<IO>(party, T, time_sz);
+      diffs = new ZKSet(party, T, time_sz);
   }
 
   ~ZKRam() { delete diffs; }
@@ -145,10 +144,10 @@ private:
 // rewrites the same value under a fresh, monotone timestamp) anchors every
 // read to the setup value without a freshness proof. T is the maximum number
 // of read() lookups. read() returns the looked-up value; write() is illegal.
-template <typename IO> class ZKROM : public ZKRam<IO> {
+class ZKROM : public ZKRam {
 public:
   ZKROM(int party, int64_t index_sz, int64_t val_sz, int64_t T)
-      : ZKRam<IO>(party, index_sz, val_sz, T, /*read_only=*/true) {}
+      : ZKRam(party, index_sz, val_sz, T, /*read_only=*/true) {}
 };
 
 } // namespace emp

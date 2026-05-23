@@ -14,14 +14,9 @@ const int W = 64;   // bit width of each fed value
 // the local Σ·Xⁱ map (mac from the bit wires, val from the cleartext LSBs).
 static F2kAuthValue make_wire(uint64_t v) {
   Integer x(W, v, ALICE);
-  block *bits = (block *)x.bits.data();
-  block mac;
-  vector_inn_prdt_sum_red(&mac, bits, ramzk_gf_base(), W);
-  block val = zero_block;
-  for (int i = 0; i < W; ++i)
-    if (getLSB(bits[i]))
-      val = val ^ ramzk_gf_base()[i];
-  return get_bool_backend()->f2k_wire(val, mac);
+  vector<F2kAuthValue> out;
+  ramzk_pack_record(get_bool_backend(), {&x}, out);
+  return out[0];
 }
 
 void test_f2k_mul(BoolIO *ios[threads], int party, int lg) {

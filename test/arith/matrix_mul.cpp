@@ -39,7 +39,7 @@ void test_circuit_zk(BoolIO *ios[threads], int party, int matrix_sz) {
 
   auto start = clock_start();
 
-  setup_zk_arith<BoolIO>(ios, threads, party);
+  setup_zk_arith(ios[0], party);
 
   IntFp *mat_a = new IntFp[test_n];
   IntFp *mat_b = new IntFp[test_n];
@@ -62,7 +62,7 @@ void test_circuit_zk(BoolIO *ios[threads], int party, int matrix_sz) {
 
   batch_reveal_check(mat_c, cr, test_n);
   auto timeuse = time_from(start);
-  finalize_zk_arith<BoolIO>();
+  finalize_zk_arith();
   cout << matrix_sz << "\t" << timeuse << " us\t" << party << " " << endl;
   std::cout << std::endl;
 

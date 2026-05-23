@@ -15,7 +15,7 @@ void test_inner_product(BoolIO *ios[threads], int party) {
   uint64_t *witness = new uint64_t[2 * sz];
   memset(witness, 0, 2 * sz * sizeof(uint64_t));
 
-  setup_zk_arith<BoolIO>(ios, threads, party);
+  setup_zk_arith(ios[0], party);
 
   IntFp *x = new IntFp[2 * sz];
 
@@ -40,10 +40,10 @@ void test_inner_product(BoolIO *ios[threads], int party) {
 
   auto start = clock_start();
   for (int j = 0; j < repeat; ++j) {
-    fp_zkp_inner_prdt<BoolIO>(x, x + sz, constant, sz);
+    fp_zkp_inner_prdt(x, x + sz, constant, sz);
   }
 
-  finalize_zk_arith<BoolIO>();
+  finalize_zk_arith();
 
   double tt = time_from(start);
   cout << "prove " << repeat << " degree-2 polynomial of length " << sz << endl;

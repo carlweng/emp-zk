@@ -20,10 +20,9 @@ using namespace std;
 #define MAKE_AUTH(val_, mac_) \
     ((__uint128_t)makeBlock((uint64_t)(mac_), (uint64_t)(val_)))
 
-template <typename IO> class FpOSTriple {
+class FpOSTriple {
 public:
   int party;
-  int threads;
   int64_t triple_n;
   __uint128_t delta;
 
@@ -32,24 +31,19 @@ public:
   std::vector<__uint128_t> andgate_left_buffer;
   std::vector<__uint128_t> andgate_right_buffer;
 
-  IO *io;
-  IO **ios;
+  BoolIO *io;
   PRG prg;
   FpVOLE<AuthValueFp> *vole = nullptr;
-  FpAuthHelper<IO> *auth_helper = nullptr;
-  ThreadPool *pool = nullptr;
+  FpAuthHelper *auth_helper = nullptr;
 
   int64_t CHECK_SZ = 1024 * 1024;
 
-  FpOSTriple(int party, int threads, IO **ios) {
+  FpOSTriple(int party, BoolIO *io) {
     this->party = party;
-    this->threads = threads;
-    io = ios[0];
-    this->ios = ios;
-    pool = new ThreadPool(threads);
+    this->io = io;
 
     if (party == BOB) delta_gen();
-    vole = new FpVOLE<AuthValueFp>(3 - party, ios[0]);
+    vole = new FpVOLE<AuthValueFp>(3 - party, io);
     if (party == BOB) vole->set_delta((uint64_t)delta);
     // One persistent sVOLE session for the whole proof; authenticated
     // values are drawn via vole->next_n() (the EdaBits / FpPolyProof
@@ -71,7 +65,7 @@ public:
     // single next_n with the per-gate value exchange the other way.
     vole->next_n((AuthValueFp *)andgate_out_buffer.data(), CHECK_SZ);
 
-    auth_helper = new FpAuthHelper<IO>(party, io);
+    auth_helper = new FpAuthHelper(party, io);
   }
 
   ~FpOSTriple() {
@@ -186,56 +180,18 @@ public:
   void andgate_correctness_check_manage() {
     io->flush();
 
-    vector<future<void>> fut;
-
     uint64_t U = 0, V = 0, W = 0;
-    if (check_cnt < 32) {
-      block share_seed;
-      share_seed_gen(&share_seed, 1);
-      io->flush();
+    block share_seed;
+    share_seed_gen(&share_seed, 1);
+    io->flush();
 
-      uint64_t sum[2];
-      andgate_correctness_check(sum, 0, 0, check_cnt, &share_seed);
-      if (party == ALICE) {
-        U = sum[0];
-        V = sum[1];
-      } else
-        W = sum[0];
-    } else {
-      std::vector<block> share_seed(threads);
-      share_seed_gen(share_seed.data(), threads);
-      io->flush();
-
-      uint32_t task_base = check_cnt / threads;
-      uint32_t leftover = task_base + (check_cnt % task_base);
-      uint32_t start = 0;
-
-      std::vector<uint64_t> sum(2 * threads);
-      uint64_t *sum_p = sum.data();
-      block *seeds_p = share_seed.data();
-
-      for (int i = 0; i < threads - 1; ++i) {
-        fut.push_back(
-            pool->enqueue([this, sum_p, i, start, task_base, seeds_p]() {
-              andgate_correctness_check(sum_p, i, start, task_base, seeds_p);
-            }));
-        start += task_base;
-      }
-      andgate_correctness_check(sum_p, threads - 1, start, leftover, seeds_p);
-
-      for (auto &f : fut)
-        f.get();
-
-      if (party == ALICE) {
-        for (int i = 0; i < threads; ++i) {
-          U = add_mod(U, sum[2 * i]);
-          V = add_mod(V, sum[2 * i + 1]);
-        }
-      } else {
-        for (int i = 0; i < threads; ++i)
-          W = add_mod(W, sum[i]);
-      }
-    }
+    uint64_t sum[2];
+    andgate_correctness_check(sum, 0, 0, check_cnt, &share_seed);
+    if (party == ALICE) {
+      U = sum[0];
+      V = sum[1];
+    } else
+      W = sum[0];
 
     if (party == ALICE) {
       __uint128_t ope_data;
@@ -482,12 +438,7 @@ public:
     return MAKE_AUTH(0, new_mac);
   }
 
-  uint64_t communication() {
-    uint64_t res = 0;
-    for (int i = 0; i < threads; ++i)
-      res += ios[i]->counter;
-    return res;
-  }
+  uint64_t communication() { return io->counter; }
 
   /* ---------------------debug functions----------------------*/
 

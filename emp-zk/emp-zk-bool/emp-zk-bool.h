@@ -62,7 +62,7 @@ inline void zkp_inner_prdt_multi(Integer *x, Integer *y, Bit *r, Bit *s,
 // get_bool_backend(), sync_zk_bool(), and the f2k wire ops above — so they
 // live here rather than as a separate module. Included after the namespace
 // block so sync_zk_bool() is already declared.
-#include "emp-zk/emp-zk-bool/ram-zk/zk_set.h"
-#include "emp-zk/emp-zk-bool/ram-zk/zk_ram.h"
+#include "emp-zk/emp-zk-bool/zk_set.h"
+#include "emp-zk/emp-zk-bool/zk_ram.h"
 
 #endif

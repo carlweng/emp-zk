@@ -85,15 +85,13 @@ static inline bool batch_reveal_check_zero(IntFp *obj, int64_t len) {
   return true;
 }
 
-template <typename IO>
 inline void fp_zkp_poly_deg2(IntFp *x, IntFp *y, uint64_t *coeff, int64_t len) {
-  FpPolyProof<IO>::fppolyproof->zkp_poly_deg2((__uint128_t *)x,
+  FpPolyProof::fppolyproof->zkp_poly_deg2((__uint128_t *)x,
                                               (__uint128_t *)y, coeff, len);
 }
 
-template <typename IO>
 inline void fp_zkp_inner_prdt(IntFp *x, IntFp *y, uint64_t constant, int64_t len) {
-  FpPolyProof<IO>::fppolyproof->zkp_inner_prdt((__uint128_t *)x,
+  FpPolyProof::fppolyproof->zkp_inner_prdt((__uint128_t *)x,
                                                (__uint128_t *)y, constant, len);
 }
 }  // namespace emp

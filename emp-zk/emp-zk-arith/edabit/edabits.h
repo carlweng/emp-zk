@@ -18,11 +18,11 @@ using namespace std;
 #define MAKE_AUTH(val_, mac_) \
     ((__uint128_t)makeBlock((uint64_t)(mac_), (uint64_t)(val_)))
 
-template <typename IO> class EdaBits {
+class EdaBits {
 public:
-  static EdaBits<IO> *conv;
+  static EdaBits *conv;
   int party;
-  IO **ios;
+  BoolIO *io;
 
   block delta_f2;
   std::vector<Integer> bool_candidate;
@@ -31,7 +31,7 @@ public:
 
   FpVOLE<AuthValueFp> *cot_fp = nullptr;
 
-  DoubAuthHelper<IO> *auth_helper = nullptr;
+  DoubAuthHelper *auth_helper = nullptr;
 
   uint32_t np_pt, np_rg, np_sz;
   uint32_t rand_pt;
@@ -45,9 +45,9 @@ public:
 
   Integer int_boo_pr, int_boo_zero, int_boo_pr_plus_two;
 
-  EdaBits(int party, int threads, IO **ios, FpVOLE<AuthValueFp> *cot_fp) {
+  EdaBits(int party, BoolIO *io, FpVOLE<AuthValueFp> *cot_fp) {
     this->party = party;
-    this->ios = ios;
+    this->io = io;
     this->cot_fp = cot_fp;
     if (party == BOB) {
       this->delta_fp = cot_fp->delta();
@@ -67,7 +67,7 @@ public:
     this->Bm1 = B - 1;
     bool_candidate.resize(ell);
 
-    auth_helper = new DoubAuthHelper<IO>(party, ios[0]);
+    auth_helper = new DoubAuthHelper(party, io);
 
     int_boo_pr = Integer(62, PR, PUBLIC);
     int_boo_zero = Integer(62, 0, PUBLIC);
@@ -191,7 +191,7 @@ public:
         auth_helper->open_check_send(diff.data(), diff_bool.data(), num);
       else
         auth_helper->open_check_recv(diff.data(), diff_bool.data(), num);
-      ios[0]->flush();
+      io->flush();
       for (int64_t i = 0; i < num; ++i)
         out[off + i] = intfp_add_const(arith_candidate[edab_fp[i]], diff[i]);
       off += num;
@@ -233,7 +233,7 @@ public:
         auth_helper->open_check_send(sum.data(), sum_fp.data(), num);
       else
         auth_helper->open_check_recv(sum.data(), sum_fp.data(), num);
-      ios[0]->flush();
+      io->flush();
       for (int64_t i = 0; i < num; ++i) {
         Integer sum_boo = Integer(62, sum[i], PUBLIC);
         sum_boo = sum_boo - bool_candidate[edab_f2[i]];
@@ -247,13 +247,13 @@ public:
   uint32_t random_point(uint32_t range) {
     uint32_t rand_pt = 0;
     if (party == ALICE) {
-      ios[0]->recv_data(&rand_pt, sizeof(uint32_t));
+      io->recv_data(&rand_pt, sizeof(uint32_t));
     } else {
       PRG prg;
       prg.random_data_unaligned(&rand_pt, sizeof(uint32_t));
       rand_pt = rand_pt % range;
-      ios[0]->send_data(&rand_pt, sizeof(uint32_t));
-      ios[0]->flush();
+      io->send_data(&rand_pt, sizeof(uint32_t));
+      io->flush();
     }
     return rand_pt;
   }
@@ -344,7 +344,7 @@ public:
     return VAL(in);
   }
 };
-template <typename IO> EdaBits<IO> *EdaBits<IO>::conv = nullptr;
+inline EdaBits *EdaBits::conv = nullptr;
 }  // namespace emp
 
 #endif

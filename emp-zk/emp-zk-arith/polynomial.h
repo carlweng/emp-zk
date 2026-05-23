@@ -8,19 +8,19 @@
 namespace emp {
 using namespace std;
 
-template <typename IO> class FpPolyProof {
+class FpPolyProof {
 public:
-  static FpPolyProof<IO> *fppolyproof;
+  static FpPolyProof *fppolyproof;
   int party;
-  IO *io;
+  BoolIO *io;
   uint64_t delta;
   int64_t buffer_sz = 1024;
   std::vector<uint64_t> buffer;
   std::vector<uint64_t> buffer1;
-  FpOSTriple<IO> *ostriple;
+  FpOSTriple *ostriple;
   int64_t num;
 
-  FpPolyProof(int party, IO *io, FpOSTriple<IO> *ostriple) {
+  FpPolyProof(int party, BoolIO *io, FpOSTriple *ostriple) {
     this->party = party;
     this->io = io;
     this->ostriple = ostriple;
@@ -152,7 +152,7 @@ public:
     num++;
   }
 };
-template <typename IO> FpPolyProof<IO> *FpPolyProof<IO>::fppolyproof = nullptr;
+inline FpPolyProof *FpPolyProof::fppolyproof = nullptr;
 }  // namespace emp
 
 #endif

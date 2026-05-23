@@ -21,7 +21,7 @@ void test(BoolIO *ios[threads], int party, bool bad) {
   int rounds = 8;
   int64_t T = (int64_t)rounds * test_n;   // number of lookups
 
-  ZKROM<BoolIO> *rom = new ZKROM<BoolIO>(party, index_sz, val_sz, T);
+  ZKROM *rom = new ZKROM(party, index_sz, val_sz, T);
   rom->init(data);
 
   // Soundness check: a malicious prover forges cell 0's value. The reads of

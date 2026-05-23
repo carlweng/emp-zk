@@ -28,7 +28,7 @@ void test(BoolIO *ios[threads], int party, bool bad) {
   for (int i = 0; i < cells; ++i)
     data.push_back(Integer(val_sz, i, ALICE));
 
-  ZKRam<BoolIO> *ram = new ZKRam<BoolIO>(party, index_sz, val_sz, T);
+  ZKRam *ram = new ZKRam(party, index_sz, val_sz, T);
   ram->init(data);
 
   if (bad && party == ALICE)

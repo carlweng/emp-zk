@@ -17,7 +17,7 @@ void test(BoolIO *ios[threads], int party, bool bad) {
   int64_t T = 64;
   int elem_sz = (int)ramzk_bits_for(T);
 
-  ZKSet<BoolIO> *s = new ZKSet<BoolIO>(party, T, elem_sz);
+  ZKSet *s = new ZKSet(party, T, elem_sz);
 
   // Query each element of {1..T}, several elements repeatedly (chains).
   for (int rep = 0; rep < 3; ++rep)

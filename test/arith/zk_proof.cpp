@@ -12,7 +12,7 @@ void test_circuit_zk(BoolIO *ios[threads], int party) {
 
   std::cout << "performance test" << std::endl;
   auto start = clock_start();
-  setup_zk_arith<BoolIO>(ios, threads, party);
+  setup_zk_arith(ios[0], party);
   auto timesetup = time_from(start);
   cout << "\tsetup: " << timesetup * 1000 << " " << party << " " << endl;
 
@@ -79,7 +79,7 @@ void test_circuit_zk(BoolIO *ios[threads], int party) {
 
   std::cout << std::endl;
 
-  finalize_zk_arith<BoolIO>();
+  finalize_zk_arith();
 
   delete[] d;
   delete[] e;

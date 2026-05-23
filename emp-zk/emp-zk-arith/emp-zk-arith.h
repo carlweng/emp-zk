@@ -13,8 +13,7 @@
 namespace emp {
 using namespace std;
 
-template <typename IO>
-inline void setup_zk_arith(IO **ios, int threads, int party,
+inline void setup_zk_arith(BoolIO *io, int party,
                            bool enable_conversion = false) {
   if (enable_conversion) {
     if (emp::backend == nullptr) {
@@ -23,33 +22,33 @@ inline void setup_zk_arith(IO **ios, int threads, int party,
   }
 
   if (party == ALICE) {
-    ZKFpExec::zk_exec = new ZKFpExecPrv<IO>(ios, threads);
-    FpPolyProof<IO>::fppolyproof =
-        new FpPolyProof<IO>(ALICE, (IO *)ios[0],
-                            ((ZKFpExecPrv<IO> *)(ZKFpExec::zk_exec))->ostriple);
+    ZKFpExec::zk_exec = new ZKFpExecPrv(io);
+    FpPolyProof::fppolyproof =
+        new FpPolyProof(ALICE, io,
+                            ((ZKFpExecPrv *)(ZKFpExec::zk_exec))->ostriple);
 
     if (enable_conversion)
-      EdaBits<IO>::conv = new EdaBits<IO>(
-          ALICE, threads, ios,
-          ((ZKFpExecPrv<IO> *)(ZKFpExec::zk_exec))->ostriple->vole);
+      EdaBits::conv = new EdaBits(
+          ALICE, io,
+          ((ZKFpExecPrv *)(ZKFpExec::zk_exec))->ostriple->vole);
 
   } else {
-    ZKFpExec::zk_exec = new ZKFpExecVer<IO>(ios, threads);
-    FpPolyProof<IO>::fppolyproof = new FpPolyProof<IO>(
-        BOB, (IO *)ios[0], ((ZKFpExecVer<IO> *)(ZKFpExec::zk_exec))->ostriple);
+    ZKFpExec::zk_exec = new ZKFpExecVer(io);
+    FpPolyProof::fppolyproof = new FpPolyProof(
+        BOB, io, ((ZKFpExecVer *)(ZKFpExec::zk_exec))->ostriple);
     if (enable_conversion) {
-      EdaBits<IO>::conv = new EdaBits<IO>(
-          BOB, threads, ios,
-          ((ZKFpExecVer<IO> *)(ZKFpExec::zk_exec))->ostriple->vole);
-      EdaBits<IO>::conv->install_boolean(emp::get_bool_delta());
+      EdaBits::conv = new EdaBits(
+          BOB, io,
+          ((ZKFpExecVer *)(ZKFpExec::zk_exec))->ostriple->vole);
+      EdaBits::conv->install_boolean(emp::get_bool_delta());
     }
   }
 }
 
-template <typename IO> inline void finalize_zk_arith() {
-  if (EdaBits<IO>::conv != nullptr)
-    delete EdaBits<IO>::conv;
-  delete FpPolyProof<IO>::fppolyproof;
+inline void finalize_zk_arith() {
+  if (EdaBits::conv != nullptr)
+    delete EdaBits::conv;
+  delete FpPolyProof::fppolyproof;
   delete ZKFpExec::zk_exec;
 }
 }  // namespace emp

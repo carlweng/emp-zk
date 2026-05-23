@@ -1,7 +1,6 @@
 #ifndef EMP_ZK_SET_H__
 #define EMP_ZK_SET_H__
 
-#include "emp-zk/emp-zk-bool/ram-zk/zk_ram_pack.h"
 #include "emp-zk/emp-zk-bool/zk_perm_proof.h"
 
 namespace emp {
@@ -18,7 +17,7 @@ using namespace std;
 // per-element counters so distinct queries to the same element chain rather
 // than collide. This is the freshness check for the read/write RAM: the RAM
 // proves clock − t ∈ {1, …, T} for every access.
-template <typename IO> class ZKSet {
+class ZKSet {
 public:
   int party;
   int64_t T;             // set is {1, …, T}

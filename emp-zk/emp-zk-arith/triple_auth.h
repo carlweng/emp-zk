@@ -2,19 +2,20 @@
 #define FP_AUTH_HELPER_H__
 
 #include "emp-tool/emp-tool.h"
+#include "emp-zk/emp-zk-bool/bool_io.h"
 
 namespace emp {
 using namespace std;
 
 #define MAC_CHECK_BUFFER_SZ 8192
 
-template <typename IO> class FpAuthHelper {
+class FpAuthHelper {
 public:
   int party;
-  IO *io;
+  BoolIO *io;
   Hash hash;
 
-  FpAuthHelper(int party, IO *io) {
+  FpAuthHelper(int party, BoolIO *io) {
     this->party = party;
     this->io = io;
   }

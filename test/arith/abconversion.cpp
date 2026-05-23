@@ -15,7 +15,7 @@ void test_mix_circuit(BoolIO *ios[threads], int party, int sz) {
     a[i] = rand() % PR;
 
   setup_zk_bool(ios[0], party);
-  setup_zk_arith<BoolIO>(ios, threads, party, true);
+  setup_zk_arith(ios[0], party, true);
 
   IntFp *x = new IntFp[sz];
   batch_feed(x, a, sz);
@@ -41,7 +41,7 @@ void test_mix_circuit(BoolIO *ios[threads], int party, int sz) {
         if (a[j + 2] > PR)
           a[j + 2] -= PR;
       }
-      bool2arith<BoolIO>(x, y, sz);
+      bool2arith(x, y, sz);
 
       for (int j = i; j < sz - 3; j += 3) {
         x[j] = x[j + 1] + x[j + 2];
@@ -49,7 +49,7 @@ void test_mix_circuit(BoolIO *ios[threads], int party, int sz) {
         if (a[j] > PR)
           a[j] -= PR;
       }
-      arith2bool<BoolIO>(y, x, sz);
+      arith2bool(y, x, sz);
     }
   }
 
@@ -67,7 +67,7 @@ void test_mix_circuit(BoolIO *ios[threads], int party, int sz) {
   std::cout << "end check arithmetic" << std::endl;
 
   finalize_zk_bool();
-  finalize_zk_arith<BoolIO>();
+  finalize_zk_arith();
 
   double tt = time_from(start);
   std::cout << "conversion: " << tt / (2 * 3 * 2) / sz << std::endl;

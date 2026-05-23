@@ -15,7 +15,7 @@ void test_input_speed(BoolIO **ios, int party, int input_sz_log) {
   for (int i = 0; i < sz; ++i)
     a[i] = rand() % PR;
 
-  setup_zk_arith<BoolIO>(ios, threads, party);
+  setup_zk_arith(ios[0], party);
 
   IntFp *x = new IntFp[sz];
 
@@ -34,7 +34,7 @@ void test_input_speed(BoolIO **ios, int party, int input_sz_log) {
   std::cout << "batch input average time: " << tt * 1000 / sz
             << " ns per element" << std::endl;
 
-  finalize_zk_arith<BoolIO>();
+  finalize_zk_arith();
 
   delete[] a;
   delete[] x;

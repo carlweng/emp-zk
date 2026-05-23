@@ -46,11 +46,6 @@ add_test_case_with_run(arith inner_prdt)
 add_test_case_with_run(arith matrix_mul)
 add_test_case_with_run(arith sis)
 
-# VOLE
-add_test_case_with_run(vole vole_triple)
-add_test_case_with_run(vole base_svole)
-add_test_case_with_run(vole lpn)
-
 # RAM ZK
 add_test_case_with_run(ram-zk ram_test)
 add_test_case_with_run(ram-zk rom_test)

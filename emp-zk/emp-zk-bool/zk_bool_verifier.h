@@ -208,7 +208,7 @@ private:
 
   void f2k_check_manage() override {
     io->flush();
-    block seed = io->get_hash_block();
+    block seed = io->io->get_digest();
     block sum[2] = { zero_block, zero_block };
     f2k_check(sum, f2k_check_cnt, seed);
 

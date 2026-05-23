@@ -50,7 +50,7 @@ public:
     std::vector<block> chi(num);
     block check_sum[5];
     if (party == ALICE) {
-      block seed = io->get_hash_block();
+      block seed = io->io->get_digest();
       uni_hash_coeff_gen(chi.data(), seed, num);
 
       for (int i = 0; i < 5; ++i)
@@ -61,7 +61,7 @@ public:
       io->send_data(check_sum, 5 * sizeof(block));
       io->flush();
     } else {
-      block seed = io->get_hash_block();
+      block seed = io->io->get_digest();
       uni_hash_coeff_gen(chi.data(), seed, num);
 
       block B;
@@ -224,7 +224,7 @@ public:
   void compress() {
     if (n_blocks == 1 || (a_pending.empty() && b_pending.empty())) return;
     bb->io->flush();
-    block seed = bb->io->get_hash_block();
+    block seed = bb->io->io->get_digest();
     std::vector<block> coeff(n_blocks);
     PRG(&seed).random_block(coeff.data(), (int)n_blocks);
     fold_(a_pending, coeff.data(), a_elems_compressed);
@@ -245,7 +245,7 @@ public:
       // Domain-separated from any compress() coefficient seed so r stays
       // independent even when the last fold and this draw share a transcript
       // point (compress() is local — it does no IO).
-      block seed = bb->io->get_hash_block() ^ makeBlock(0, 1);
+      block seed = bb->io->io->get_digest() ^ makeBlock(0, 1);
       block r;
       PRG(&seed).random_block(&r, 1);
       F2kAuthValue pa = eval_(a_elems_compressed, r);

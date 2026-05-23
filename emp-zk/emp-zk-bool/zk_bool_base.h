@@ -166,7 +166,7 @@ public:
   // exchange + compare. Fires once per CHECK_SZ buffered ANDs.
   void andgate_correctness_check_manage() {
     io->flush();
-    block seed = io->get_hash_block();
+    block seed = io->io->get_digest();
     // ALICE writes (A0, A1) into sum[0..1]; BOB writes B into sum[0].
     block sum[2] = { zero_block, zero_block };
     andgate_correctness_check(sum, check_cnt, seed);

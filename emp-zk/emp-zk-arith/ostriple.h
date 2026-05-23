@@ -438,7 +438,7 @@ public:
     return MAKE_AUTH(0, new_mac);
   }
 
-  uint64_t communication() { return io->counter; }
+  uint64_t communication() { return io->send_counter; }
 
   /* ---------------------debug functions----------------------*/
 

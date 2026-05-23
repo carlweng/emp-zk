@@ -51,7 +51,6 @@ public:
     ptr++;
     if (ptr == NETWORK_STAGING_BUFFER_SIZE) {
       io->send_bool(buf.get(), NETWORK_STAGING_BUFFER_SIZE);
-      counter += NETWORK_STAGING_BUFFER_SIZE / 8;   // packed wire bytes
       ptr = 0;
     }
   }

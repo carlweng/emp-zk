@@ -348,10 +348,10 @@ private:
 // public or private wires. The shared bit→f2k conversion for the
 // permutation-based RAM/ROM/set data structures.
 inline void ramzk_pack_record(ZKBoolBase *bb,
-                              std::initializer_list<const Integer *> parts,
+                              std::initializer_list<const SignedInt *> parts,
                               vector<F2kAuthValue> &out) {
   vector<block> wire;
-  for (const Integer *p : parts) {
+  for (const SignedInt *p : parts) {
     const block *b = (const block *)p->bits.data();
     wire.insert(wire.end(), b, b + p->bits.size());
   }

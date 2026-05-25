@@ -22,11 +22,11 @@ void test_mix_circuit(BoolIO *ios[threads], int party, int sz) {
 
   sync_zk_bool();
 
-  Integer *y = new Integer[sz];
+  SignedInt *y = new SignedInt[sz];
   for (int i = 0; i < sz; ++i)
-    y[i] = Integer(62, a[i], ALICE);
+    y[i] = SignedInt(62, a[i], ALICE);
 
-  Integer PR_bl = Integer(62, PR, PUBLIC);
+  SignedInt PR_bl = SignedInt(62, PR, PUBLIC);
 
   sync_zk_bool();
 
@@ -55,7 +55,7 @@ void test_mix_circuit(BoolIO *ios[threads], int party, int sz) {
 
   int incorrect_cnt = 0;
   for (int i = 0; i < sz; ++i) {
-    Bit ret = y[i].equal(Integer(62, a[i], PUBLIC));
+    Bit ret = y[i].equal(SignedInt(62, a[i], PUBLIC));
     if (ret.reveal<bool>(PUBLIC) != 1)
       incorrect_cnt++;
   }

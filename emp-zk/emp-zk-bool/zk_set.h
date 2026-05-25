@@ -34,19 +34,19 @@ public:
     if (party == ALICE)
       ver.assign((size_t)T + 1, 0);
     // Setup: write (e, version 0) for every element of the public range.
-    Integer ver0(ver_sz, (uint64_t)0, PUBLIC);
+    SignedInt ver0(ver_sz, (uint64_t)0, PUBLIC);
     for (int64_t e = 1; e <= T; ++e)
-      emit_(/*toA=*/false, Integer(elem_sz, (uint64_t)e, PUBLIC), ver0);
+      emit_(/*toA=*/false, SignedInt(elem_sz, (uint64_t)e, PUBLIC), ver0);
   }
 
   // Prove that the committed value v ∈ {1, …, T}. Appends a (v, ver) read and
   // a (v, ver+1) write, mirroring a ROM lookup of key v.
-  void prove_member(const Integer &v) {
+  void prove_member(const SignedInt &v) {
     uint64_t e = v.reveal<uint64_t>(ALICE);
     uint64_t vv = (party == ALICE) ? ver[e] : 0;
-    Integer ver_old(ver_sz, vv, ALICE);
+    SignedInt ver_old(ver_sz, vv, ALICE);
     emit_(/*toA=*/true, v, ver_old);                                // read
-    emit_(/*toA=*/false, v, ver_old + Integer(ver_sz, 1, PUBLIC));  // write
+    emit_(/*toA=*/false, v, ver_old + SignedInt(ver_sz, 1, PUBLIC));  // write
     if (party == ALICE)
       ver[e] = vv + 1;
   }
@@ -55,14 +55,14 @@ public:
   void check() {
     for (int64_t e = 1; e <= T; ++e) {
       uint64_t vv = (party == ALICE) ? ver[e] : 0;
-      emit_(/*toA=*/true, Integer(elem_sz, (uint64_t)e, PUBLIC),
-            Integer(ver_sz, vv, ALICE));
+      emit_(/*toA=*/true, SignedInt(elem_sz, (uint64_t)e, PUBLIC),
+            SignedInt(ver_sz, vv, ALICE));
     }
     perm.check_eq();
   }
 
 private:
-  void emit_(bool toA, const Integer &element, const Integer &version) {
+  void emit_(bool toA, const SignedInt &element, const SignedInt &version) {
     elem_.clear();
     ramzk_pack_record(bb, {&element, &version}, elem_);
     if (toA)

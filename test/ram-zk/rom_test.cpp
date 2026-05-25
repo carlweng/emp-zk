@@ -14,9 +14,9 @@ void test(BoolIO *ios[threads], int party, bool bad) {
   int test_n = (1 << index_sz);   // number of cells
 
   // Memory content x[i] = 2*i.
-  vector<Integer> data;
+  vector<SignedInt> data;
   for (int i = 0; i < test_n; ++i)
-    data.push_back(Integer(val_sz, 2 * i, ALICE));
+    data.push_back(SignedInt(val_sz, 2 * i, ALICE));
 
   int rounds = 8;
   int64_t T = (int64_t)rounds * test_n;   // number of lookups
@@ -34,8 +34,8 @@ void test(BoolIO *ios[threads], int party, bool bad) {
   int wrong = 0;
   for (int r = 0; r < rounds; ++r)
     for (int i = 0; i < test_n; ++i) {
-      Integer res = rom->read(Integer(index_sz, i, PUBLIC));
-      Bit eq = res == Integer(val_sz, i * 2, ALICE);
+      SignedInt res = rom->read(SignedInt(index_sz, i, PUBLIC));
+      Bit eq = res == SignedInt(val_sz, i * 2, ALICE);
       if (!eq.reveal<bool>(PUBLIC)) wrong++;
     }
   rom->check();   // proves reads ∼ writes; aborts on a forged read

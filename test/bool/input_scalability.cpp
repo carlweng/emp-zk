@@ -14,9 +14,9 @@ void test_circuit_zk(BoolIO *ios[threads], int party, int log_trial) {
   if (input_sz < 100000000LL) {
     auto start = clock_start();
     setup_zk_bool(ios[0], party);
-    Integer *a = new Integer[input_sz / 32];
+    SignedInt *a = new SignedInt[input_sz / 32];
     for (int i = 0; i < input_sz / 32; ++i)
-      a[i] = Integer(32, i, ALICE);
+      a[i] = SignedInt(32, i, ALICE);
 
     a[0][0].reveal<bool>(PUBLIC);
     finalize_zk_bool();
@@ -28,11 +28,11 @@ void test_circuit_zk(BoolIO *ios[threads], int party, int log_trial) {
     auto start = clock_start();
     setup_zk_bool(ios[0], party);
     int round = input_sz / unit;
-    Integer **a = (Integer **)malloc(round * sizeof(Bit *));
+    SignedInt **a = (SignedInt **)malloc(round * sizeof(Bit *));
     for (int i = 0; i < round; ++i) {
-      a[i] = new Integer[unit];
+      a[i] = new SignedInt[unit];
       for (int j = 0; j < unit / 32; ++j)
-        a[i][j] = Integer(32, j, ALICE);
+        a[i][j] = SignedInt(32, j, ALICE);
     }
     a[0][0][0].reveal<bool>(PUBLIC);
     finalize_zk_bool();

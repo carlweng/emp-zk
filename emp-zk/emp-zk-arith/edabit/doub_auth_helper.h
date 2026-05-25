@@ -6,11 +6,13 @@
 #include "emp-tool/emp-tool.h"
 #include "emp-zk/emp-zk-bool/bool_io.h"
 
+// emp-tool no longer binds a default wire; emp-zk is a block-wire library.
+EMP_USE_CIRCUIT_TYPES(block, Bit, SignedInt);
+
 namespace emp {
 using namespace std;
 
 using namespace emp;
-using Integer = SignedInt;
 
 // AuthValue accessors (val-first layout: val in low 64, mac in high 64).
 #define VAL(x) _mm_extract_epi64((block)x, 0)
@@ -56,24 +58,24 @@ public:
     hash.put(mac.data(), len * sizeof(uint64_t));
   }
 
-  // The Integer-side reveal short-circuits through the prover's
+  // The SignedInt-side reveal short-circuits through the prover's
   // public reveal channel rather than re-deriving the MAC bit-by-bit
   // here. The earlier hand-rolled bitset version drove identical
   // hash transcripts in both checks; the simpler form below preserves
   // that invariant because both sides land at the same plaintext.
-  void open_check_send(uint64_t *val, Integer *dat_f2, int64_t len) {
+  void open_check_send(uint64_t *val, SignedInt *dat_f2, int64_t len) {
     for (int64_t i = 0; i < len; ++i)
       val[i] = dat_f2[i].reveal<uint64_t>(PUBLIC);
   }
 
-  void open_check_recv(uint64_t *val, Integer *dat_f2, int64_t len) {
+  void open_check_recv(uint64_t *val, SignedInt *dat_f2, int64_t len) {
     for (int64_t i = 0; i < len; ++i)
       val[i] = dat_f2[i].reveal<uint64_t>(PUBLIC);
   }
 
   /* --------------------- open and check ----------------------*/
 
-  void open_check_send(Integer *dat_f2, __uint128_t *dat_fp, int64_t len) {
+  void open_check_send(SignedInt *dat_f2, __uint128_t *dat_fp, int64_t len) {
     std::vector<uint64_t> val(len);
     for (int64_t i = 0; i < len; ++i) {
       val[i] = VAL(dat_fp[i]);
@@ -87,7 +89,7 @@ public:
       hash.put_block((block *)dat_f2[i].bits.data(), bit_len);
   }
 
-  void open_check_recv(Integer *dat_f2, __uint128_t *dat_fp, int64_t len) {
+  void open_check_recv(SignedInt *dat_f2, __uint128_t *dat_fp, int64_t len) {
     std::vector<uint64_t> val(len);
     io->recv_data(val.data(), len * sizeof(uint64_t));
     for (int64_t i = 0; i < len; ++i) {

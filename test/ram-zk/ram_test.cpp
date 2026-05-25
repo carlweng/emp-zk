@@ -24,9 +24,9 @@ void test(BoolIO *ios[threads], int party, bool bad) {
   int rounds = 4;
   int64_t T = (int64_t)rounds * cells * 2;   // each sweep: 1 write + 1 read / cell
 
-  vector<Integer> data;
+  vector<SignedInt> data;
   for (int i = 0; i < cells; ++i)
-    data.push_back(Integer(val_sz, i, ALICE));
+    data.push_back(SignedInt(val_sz, i, ALICE));
 
   ZKRam *ram = new ZKRam(party, index_sz, val_sz, T);
   ram->init(data);
@@ -43,9 +43,9 @@ void test(BoolIO *ios[threads], int party, bool bad) {
   for (int r = 0; r < rounds; ++r)
     for (int i = 0; i < cells; ++i) {
       expect[i] += cells;
-      ram->write(Integer(index_sz, i, PUBLIC), Integer(val_sz, expect[i], ALICE));
-      Integer got = ram->read(Integer(index_sz, i, PUBLIC));
-      Bit eq = got == Integer(val_sz, expect[i], ALICE);
+      ram->write(SignedInt(index_sz, i, PUBLIC), SignedInt(val_sz, expect[i], ALICE));
+      SignedInt got = ram->read(SignedInt(index_sz, i, PUBLIC));
+      Bit eq = got == SignedInt(val_sz, expect[i], ALICE);
       if (!eq.reveal<bool>(PUBLIC))
         wrong++;
     }

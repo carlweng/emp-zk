@@ -13,7 +13,7 @@ const int W = 64;   // bit width of each fed value
 // feed W authenticated bits, then pack them into one F(2^128) element via
 // the local Σ·Xⁱ map (mac from the bit wires, val from the cleartext LSBs).
 static F2kAuthValue make_wire(uint64_t v) {
-  Integer x(W, v, ALICE);
+  SignedInt x(W, v, ALICE);
   vector<F2kAuthValue> out;
   ramzk_pack_record(get_bool_backend(), {&x}, out);
   return out[0];

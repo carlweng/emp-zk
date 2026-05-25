@@ -47,7 +47,7 @@ inline void zkp_inner_prdt_eq(Bit *x, Bit *y, Bit *r, Bit *s, Bit *rr, Bit *ss,
       len, len2);
 }
 
-inline void zkp_inner_prdt_multi(Integer *x, Integer *y, Bit *r, Bit *s,
+inline void zkp_inner_prdt_multi(SignedInt *x, SignedInt *y, Bit *r, Bit *s,
                                  int64_t len, int64_t width) {
   get_bool_backend()->polyproof->zkp_inner_prdt_multi(x, y, r, s, len, width);
 }

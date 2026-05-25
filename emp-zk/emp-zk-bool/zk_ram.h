@@ -57,26 +57,26 @@ public:
   ~ZKRam() { delete diffs; }
 
   // Setup: commit the initial contents and emit a write (i, x[i], 0) per cell.
-  void init(vector<Integer> &content) {
+  void init(vector<SignedInt> &content) {
     n = (int64_t)content.size();
     if (party == ALICE) {
       mem.resize(n);
       last_t.assign(n, 0);
     }
-    Integer time0(time_sz, (uint64_t)0, PUBLIC);
+    SignedInt time0(time_sz, (uint64_t)0, PUBLIC);
     for (int64_t i = 0; i < n; ++i) {
       if (party == ALICE)
         mem[i] = content[i].reveal<uint64_t>(ALICE);
       else
         content[i].reveal<uint64_t>(ALICE);
-      emit_(/*toA=*/false, content[i], Integer(index_sz, (uint64_t)i, PUBLIC),
+      emit_(/*toA=*/false, content[i], SignedInt(index_sz, (uint64_t)i, PUBLIC),
             time0);
     }
   }
 
-  Integer read(const Integer &index) { return access_(index, index, false); }
+  SignedInt read(const SignedInt &index) { return access_(index, index, false); }
 
-  void write(const Integer &index, const Integer &value) {
+  void write(const SignedInt &index, const SignedInt &value) {
     if (read_only)
       error("ZKRam: write() on read-only memory");
     access_(index, value, true);
@@ -87,8 +87,8 @@ public:
     for (int64_t i = 0; i < n; ++i) {
       uint64_t v = (party == ALICE) ? mem[i] : 0;
       uint64_t t = (party == ALICE) ? last_t[i] : 0;
-      emit_(/*toA=*/true, Integer(val_sz, v, ALICE),
-            Integer(index_sz, (uint64_t)i, PUBLIC), Integer(time_sz, t, ALICE));
+      emit_(/*toA=*/true, SignedInt(val_sz, v, ALICE),
+            SignedInt(index_sz, (uint64_t)i, PUBLIC), SignedInt(time_sz, t, ALICE));
     }
     perm.check_eq();
     if (!read_only)
@@ -98,26 +98,26 @@ public:
 private:
   // One access. `value` is the new contents on a store; ignored on a load
   // (where we pass `index` as a harmless placeholder). Returns the old value.
-  Integer access_(const Integer &index, const Integer &value, bool is_write) {
+  SignedInt access_(const SignedInt &index, const SignedInt &value, bool is_write) {
     uint64_t ci = index.reveal<uint64_t>(ALICE);
     uint64_t v_old = 0, t_old = 0;
     if (party == ALICE) {
       v_old = mem[ci];
       t_old = last_t[ci];
     }
-    Integer old(val_sz, v_old, ALICE);
-    Integer time_old(time_sz, t_old, ALICE);
+    SignedInt old(val_sz, v_old, ALICE);
+    SignedInt time_old(time_sz, t_old, ALICE);
 
     // shuffle 2: prove the last write to this cell is in the past.
     if (!read_only) {
-      Integer diff = Integer(time_sz, (uint64_t)clock, PUBLIC) - time_old;
+      SignedInt diff = SignedInt(time_sz, (uint64_t)clock, PUBLIC) - time_old;
       diffs->prove_member(diff);
     }
 
     // shuffle 1: read the old (addr, value, time), write back the new state.
     emit_(/*toA=*/true, old, index, time_old);
-    Integer newv = is_write ? value : old;
-    emit_(/*toA=*/false, newv, index, Integer(time_sz, (uint64_t)clock, PUBLIC));
+    SignedInt newv = is_write ? value : old;
+    emit_(/*toA=*/false, newv, index, SignedInt(time_sz, (uint64_t)clock, PUBLIC));
 
     if (party == ALICE) {
       mem[ci] = is_write ? value.reveal<uint64_t>(ALICE) : v_old;
@@ -129,8 +129,8 @@ private:
     return old;
   }
 
-  void emit_(bool toA, const Integer &value, const Integer &index,
-             const Integer &time) {
+  void emit_(bool toA, const SignedInt &value, const SignedInt &index,
+             const SignedInt &time) {
     elem_.clear();
     ramzk_pack_record(bb, {&value, &index, &time}, elem_);
     if (toA)

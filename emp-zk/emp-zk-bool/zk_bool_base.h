@@ -251,12 +251,12 @@ public:
 
   // Pack a cleartext F(2^128) value v into the MAC layout the polynomial
   // product expects (Σ vᵢ·Xⁱ over the 128 bits of v, via the 65-bit
-  // lo/hi Integer feed).
+  // lo/hi SignedInt feed).
   block f2k_pack_v(block v) {
     uint64_t low  = _mm_extract_epi64(v, 0);
     uint64_t high = _mm_extract_epi64(v, 1);
-    Integer lowInt(65, low, ALICE);
-    Integer highInt(65, high, ALICE);
+    SignedInt lowInt(65, low, ALICE);
+    SignedInt highInt(65, high, ALICE);
     block packbuf[128], m;
     memcpy(packbuf,      lowInt.bits.data(),  64 * sizeof(block));
     memcpy(packbuf + 64, highInt.bits.data(), 64 * sizeof(block));

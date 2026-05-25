@@ -13,9 +13,9 @@ void test_circuit_zk(BoolIO *ios[threads], int party, int input_sz_lg) {
   long long input_sz = 1 << input_sz_lg;
   setup_zk_bool(ios[0], party);
   auto start = clock_start();
-  Integer a(32, 2, ALICE);
-  Integer b(32, 3, ALICE);
-  Integer c(32, 0, PUBLIC);
+  SignedInt a(32, 2, ALICE);
+  SignedInt b(32, 3, ALICE);
+  SignedInt c(32, 0, PUBLIC);
   for (int i = 0; i < input_sz; ++i) {
     b = b + a;
     for (int j = 0; j < 32; ++j) {

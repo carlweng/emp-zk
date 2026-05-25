@@ -4,13 +4,11 @@
 #include "emp-ot/emp-ot.h"
 #include "emp-tool/emp-tool.h"
 
+// emp-tool no longer binds a default wire; emp-zk is a block-wire library.
+EMP_USE_CIRCUIT_TYPES(block, Bit, SignedInt);
+
 namespace emp {
 using namespace std;
-
-// emp-tool main spells the v0.3.x `Integer` as `SignedInt` (template
-// alias `using Integer = SignedInt;` lives in emp-sh2pc's umbrella).
-// emp-zk doesn't link emp-sh2pc, so re-introduce the alias locally.
-using Integer = SignedInt;
 
 class PolyProof {
 public:
@@ -207,7 +205,7 @@ public:
     num++;
   }
 
-  inline void zkp_inner_prdt_multi(Integer *polyx, Integer *polyy, Bit *r,
+  inline void zkp_inner_prdt_multi(SignedInt *polyx, SignedInt *polyy, Bit *r,
                                    Bit *s, int64_t len, int64_t in_width) {
     for (int64_t width = 0; width < in_width; ++width) {
       if (num >= buffer_sz)

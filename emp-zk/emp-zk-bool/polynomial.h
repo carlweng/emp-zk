@@ -4,10 +4,9 @@
 #include "emp-ot/emp-ot.h"
 #include "emp-tool/emp-tool.h"
 
-// emp-tool no longer binds a default wire; emp-zk is a block-wire library.
-EMP_USE_CIRCUIT_TYPES(block, Bit, SignedInt);
-
 namespace emp {
+using block_types::Bit;
+using block_types::SignedInt;
 using namespace std;
 
 class PolyProof {

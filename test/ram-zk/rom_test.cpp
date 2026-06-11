@@ -10,18 +10,18 @@ const int threads = 1;
 int index_sz = 5, val_sz = 32;
 
 void test(BoolIO *ios[threads], int party, bool bad) {
-  setup_zk_bool(ios[0], party);
+  ZKBoolSession sess(ios[0], party);
   int test_n = (1 << index_sz);   // number of cells
 
   // Memory content x[i] = 2*i.
-  vector<SignedInt> data;
+  vector<ZKInt> data;
   for (int i = 0; i < test_n; ++i)
-    data.push_back(SignedInt(val_sz, 2 * i, ALICE));
+    data.push_back(sess.input_int(val_sz, 2 * i, ALICE));
 
   int rounds = 8;
   int64_t T = (int64_t)rounds * test_n;   // number of lookups
 
-  ZKROM *rom = new ZKROM(party, index_sz, val_sz, T);
+  ZKROM *rom = new ZKROM(sess, index_sz, val_sz, T);
   rom->init(data);
 
   // Soundness check: a malicious prover forges cell 0's value. The reads of
@@ -34,14 +34,14 @@ void test(BoolIO *ios[threads], int party, bool bad) {
   int wrong = 0;
   for (int r = 0; r < rounds; ++r)
     for (int i = 0; i < test_n; ++i) {
-      SignedInt res = rom->read(SignedInt(index_sz, i, PUBLIC));
-      Bit eq = res == SignedInt(val_sz, i * 2, ALICE);
-      if (!eq.reveal<bool>(PUBLIC)) wrong++;
+      ZKInt res = rom->read(sess.input_int(index_sz, i, PUBLIC));
+      ZKBit eq = res == sess.input_int(val_sz, i * 2, ALICE);
+      if (!sess.reveal(eq, PUBLIC).value_or(false)) wrong++;
     }
   rom->check();   // proves reads ∼ writes; aborts on a forged read
   double t = time_from(start);
 
-  finalize_zk_bool();
+  sess.finalize();
   int accesses = rounds * test_n;
   cout << "ROM ok (cells=" << test_n << ", accesses=" << accesses
        << ", wrong=" << wrong << ")  " << t / accesses << " us/access  party "

@@ -10,10 +10,12 @@
 >   `python3 install.py --tool=v0.3.x --ot=v0.3.x --zk=v0.3.x`
 >   reproduces the prior emp-zk line. Bug fixes will be backported.
 > - **New projects, or willing to migrate: track `main`** — built against
->   the unified `Backend* backend` line of emp-tool / emp-ot v1.0.
->   `emp-zk-bool` plugs into the new global `Backend` via a
->   composition-style wrapper; `emp-zk-arith` keeps its own
->   `ZKFpExec::zk_exec` singleton. `BaseCot` and `TwoKeyPRP` (which
+>   the C++20 BooleanContext line of emp-tool / emp-ot v1.0.
+>   `emp-zk-bool` is a native `BooleanContext` (`ZKBoolContext`) driven by an
+>   explicit `ZKBoolSession` handle — no global backend; gadgets receive the
+>   session and circuit values are `Bit_T<ZKBoolContext>` / `Int_T<…>`.
+>   `emp-zk-arith` still keeps its own `ZKFpExec::zk_exec` singleton (staged).
+>   `BaseCot` and `TwoKeyPRP` (which
 >   moved out of emp-ot main) are vendored locally under
 >   `emp-zk/emp-vole/`, and the `GaloisFieldPacking::base[]` array
 >   that ram-zk indexes is provided by a small `ramzk_gf_base()`
@@ -27,7 +29,7 @@ The code in this repo implements a fast, scalable, communication-efficient zero-
 ## Requirements
 
 - CMake ≥ 3.21
-- A C++17 compiler
+- A C++20 compiler
 - OpenSSL (≥ 1.1)
 - emp-tool / emp-ot at the matching release line
 

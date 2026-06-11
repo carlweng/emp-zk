@@ -1,32 +1,34 @@
 #ifndef EMP_ZK_BOOL_BASE_H__
 #define EMP_ZK_BOOL_BASE_H__
 
-// emp-zk-bool's plug into the unified Backend* backend on emp-tool
-// main. Single-threaded; one BoolIO* drives both the gate-level bool
-// stream and Ferret's OT-extension data.
+// The emp-zk-bool proof engine — a standalone class (no emp-tool Backend
+// inheritance, no global pointer) wrapped by ZKBoolContext (zk_context.h) and
+// owned by ZKBoolSession (zk_session.h). Single-threaded; one BoolIO* drives both
+// the gate-level bool stream and Ferret's OT-extension data.
 //
 // Layout:
-//   - zk_bool_base.h     — ZKBoolBase: shared state + the AND-gate
-//                          batch correctness-check entry point, with
-//                          virtual hooks for the role-specific check
-//                          and aggregator.
-//   - zk_bool_prover.h   — ZKBoolProver: ALICE-side methods
-//                          (auth_compute_and, authenticated_bits_input,
-//                          verify_output, finalize_macs, hooks) and the
-//                          Backend overrides routing to them.
+//   - zk_bool_base.h     — ZKBoolBase: shared state, the typed gate / I-O surface
+//                          (public_block/xor_block + the virtual and_block /
+//                          not_block / feed_bits / reveal_bits), and the AND-gate
+//                          batch correctness-check entry point with virtual hooks
+//                          for the role-specific check and aggregator.
+//   - zk_bool_prover.h   — ZKBoolProver: ALICE-side methods (auth_compute_and,
+//                          authenticated_bits_input, verify_output, finalize_macs,
+//                          hooks) and the gate/I-O overrides routing to them.
 //   - zk_bool_verifier.h — symmetric for the verifier.
 //
-// What used to be a separate OSTriple class is folded directly into
-// the backend hierarchy: state goes on the base, prover-specific
-// methods go in ZKBoolProver, verifier-specific in ZKBoolVerifier.
-// Removes the runtime party dispatch (`if (party == ALICE) … else …`)
-// scattered through every method.
+// What used to be a separate OSTriple class is folded directly into the engine
+// hierarchy: state goes on the base, prover-specific methods go in ZKBoolProver,
+// verifier-specific in ZKBoolVerifier. Removes the runtime party dispatch
+// (`if (party == ALICE) … else …`) scattered through every method.
 
 #include <emp-tool/emp-tool.h>
 #include "emp-ot/emp-ot.h"
 
+#include "emp-zk/emp-zk-bool/zk_wire.h"
 #include "emp-zk/emp-zk-bool/bool_io.h"
 #include "emp-zk/emp-zk-bool/polynomial.h"
+#include <memory>
 
 namespace emp {
 using namespace std;
@@ -35,9 +37,18 @@ using namespace std;
 // storage as the sVOLE carrier; named for its role as a circuit wire.
 using F2kAuthValue = AuthValueF2k;
 
-class ZKBoolBase : public Backend {
+// The emp-zk-bool proof engine: a standalone class (no emp-tool Backend, no
+// global pointer) wrapped by ZKBoolContext (zk_context.h) and owned by
+// ZKBoolSession (zk_session.h). It works purely in raw `block`s and never names
+// the typed circuit layer, so it sits below ZKBoolContext / ZKInt in the include
+// order. Party-specific gate and I/O behaviour is virtual on its own vtable: the
+// prover /
+// verifier subclasses implement and_block / not_block / feed_bits / reveal_bits.
+class ZKBoolBase {
 public:
   static constexpr int64_t CHECK_SZ = 1024 * 1024;
+
+  int party;            // ALICE (prover) or BOB (verifier)
 
   // ---- Shared state (formerly OSTriple + ZKBoolBase) -----------
   block delta;          // Ferret global secret. Prover side just stores it.
@@ -83,7 +94,7 @@ public:
 
   // ---- Lifecycle ------------------------------------------------------
 
-  ZKBoolBase(int p, BoolIO *io_) : Backend(p), io(io_) {
+  ZKBoolBase(int p, BoolIO *io_) : party(p), io(io_) {
     // BoolIO inherits IOChannel publicly with the IOChannel subobject at
     // offset 0, so the cast is a no-op at runtime. Ferret now takes a
     // single IOChannel (post-unification with the other OT extensions).
@@ -122,7 +133,7 @@ public:
     polyproof = new PolyProof(p, io_, ferret);
   }
 
-  ~ZKBoolBase() override {
+  virtual ~ZKBoolBase() {
     delete polyproof;   // PolyProof::batch_check draws COTs via next_n — session still open
     ferret->end();      // close the persistent streaming session (final round + chi-fold check)
     delete ferret;
@@ -151,18 +162,29 @@ public:
     return b ^ (delta & makeBlock(m, m));
   }
 
-  // ---- Backend overrides shared by both sides -------------------------
+  // ---- Gate surface (replaces the old emp-tool Backend vtable) --------
+  // Shared, non-virtual: public constants and XOR are party-agnostic.
+  block public_block(bool b) const { return pub_label[b]; }
+  block xor_block(block l, block r) const { return l ^ r; }
+  uint64_t num_and() const { return gid; }
 
-  size_t wire_bytes() const override { return sizeof(block); }
+  // Party-specific gates / I-O, implemented by the prover / verifier subclass.
+  virtual block and_block(block l, block r) = 0;
+  virtual block not_block(block in) = 0;
+  virtual void feed_bits(block *out, int from_party, const bool *in, size_t n) = 0;
+  virtual void reveal_bits(bool *out, int to_party, const block *in, size_t n) = 0;
 
-  void public_label(void *o, bool b) override {
-    *static_cast<block *>(o) = pub_label[b];
+  // Commit `width` authenticated bits of `value`, ZERO-extended beyond bit 63,
+  // into `out` via feed_bits. The f2k packing path uses this to commit a
+  // cleartext field limb as prover-owned authenticated bits; it must NOT
+  // sign-extend (which Int_T::constant would). Draws exactly `width` COTs.
+  void authenticated_input_bits_zero_extend(block *out, int width,
+                                            uint64_t value, int owner = ALICE) {
+    auto b = std::make_unique<bool[]>((size_t)width);   // real bool[], no byte→bool cast
+    for (int i = 0; i < width; ++i)
+      b[(size_t)i] = (i < 64) ? (((value >> i) & 1) != 0) : false;
+    feed_bits(out, owner, b.get(), (size_t)width);
   }
-  void xor_gate(void *o, const void *l, const void *r) override {
-    *static_cast<block *>(o) =
-        *static_cast<const block *>(l) ^ *static_cast<const block *>(r);
-  }
-  uint64_t num_and() override { return gid; }
 
   // ---- AND-gate batch correctness check (single-threaded) ------------
   //
@@ -255,11 +277,15 @@ public:
   block f2k_pack_v(block v) {
     uint64_t low  = _mm_extract_epi64(v, 0);
     uint64_t high = _mm_extract_epi64(v, 1);
-    SignedInt lowInt(65, low, ALICE);
-    SignedInt highInt(65, high, ALICE);
-    block packbuf[128], m;
-    memcpy(packbuf,      lowInt.bits.data(),  64 * sizeof(block));
-    memcpy(packbuf + 64, highInt.bits.data(), 64 * sizeof(block));
+    // Commit 65 zero-extended authenticated bits per limb. Only the low 64 are
+    // packed, but the 65th is still drawn (one COT each) so Ferret consumption —
+    // and the honest-path transcript — stays byte-identical to the old
+    // SignedInt(65, ., ALICE) path this replaces.
+    block lowbits[65], highbits[65], packbuf[128], m;
+    authenticated_input_bits_zero_extend(lowbits, 65, low, ALICE);
+    authenticated_input_bits_zero_extend(highbits, 65, high, ALICE);
+    memcpy(packbuf,      lowbits,  64 * sizeof(block));
+    memcpy(packbuf + 64, highbits, 64 * sizeof(block));
     pack.packing(&m, packbuf);
     return m;
   }
@@ -297,13 +323,6 @@ public:
   virtual block f2k_mul_v(int64_t N, const block *vals) = 0;
   virtual void f2k_check_manage() = 0;
 };
-
-// Cross-module accessors. edabit / arith / RAM reach into the bool
-// backend for state and helpers — the cast asserts in debug if the
-// global `backend` isn't actually one of ours.
-inline ZKBoolBase *get_bool_backend() {
-  return static_cast<ZKBoolBase *>(backend);
-}
 
 } // namespace emp
 

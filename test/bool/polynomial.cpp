@@ -15,10 +15,10 @@ void test_polynomial(BoolIO *ios[threads], int party) {
   bool *witness = new bool[2 * sz];
   memset(witness, 0, 2 * sz * sizeof(bool));
 
-  setup_zk_bool(ios[0], party);
-  sync_zk_bool();
+  ZKBoolSession sess(ios[0], party);
+  sess.flush();
 
-  Bit *x = new Bit[2 * sz];
+  ZKBit *x = new ZKBit[2 * sz];
 
   if (party == ALICE) {
     bool sum = 0, tmp;
@@ -37,15 +37,15 @@ void test_polynomial(BoolIO *ios[threads], int party) {
   ios[0]->flush();
 
   for (int i = 0; i < 2 * sz; ++i)
-    x[i] = Bit(witness[i], ALICE);
+    x[i] = sess.input<ZKBit>(ALICE, witness[i]);
 
-  sync_zk_bool();
+  sess.flush();
   auto start = clock_start();
   for (int j = 0; j < repeat; ++j) {
-    zkp_poly_deg2(x, x + sz, coeff, sz);
+    zkp_poly_deg2(sess, x, x + sz, coeff, sz);
   }
 
-  finalize_zk_bool();
+  sess.finalize();
 
   double tt = time_from(start);
   cout << "prove " << repeat << " degree-2 polynomial of length " << sz << endl;

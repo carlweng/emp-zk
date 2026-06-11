@@ -24,30 +24,36 @@ public:
   int64_t elem_sz;       // bit width of an element (and of queried values)
   int64_t ver_sz;        // version field; per-element queries ≤ T
   vector<uint64_t> ver;  // ALICE: latest version per element, indexed by value
+  ZKBoolSession &zk;     // owns the engine; source of input_int / reveal_int
   ZKBoolBase *bb;
   ZKPermProof perm;      // A = reads (queries + teardown), B = writes (setup)
   vector<F2kAuthValue> elem_;
 
-  ZKSet(int party, int64_t T, int64_t elem_sz)
-      : party(party), T(T), elem_sz(elem_sz), ver_sz(ramzk_bits_for(T)),
-        bb(get_bool_backend()), perm(elem_sz + ver_sz) {
+  ZKSet(ZKBoolSession &sess, int64_t T, int64_t elem_sz)
+      : party(sess.party()), T(T), elem_sz(elem_sz), ver_sz(ramzk_bits_for(T)),
+        zk(sess), bb(&sess.engine()), perm(sess, elem_sz + ver_sz) {
     if (party == ALICE)
       ver.assign((size_t)T + 1, 0);
     // Setup: write (e, version 0) for every element of the public range.
-    SignedInt ver0(ver_sz, (uint64_t)0, PUBLIC);
+    ZKInt ver0 = zk.input_int(ver_sz, 0, PUBLIC);
     for (int64_t e = 1; e <= T; ++e)
-      emit_(/*toA=*/false, SignedInt(elem_sz, (uint64_t)e, PUBLIC), ver0);
+      emit_(/*toA=*/false, zk.input_int(elem_sz, (uint64_t)e, PUBLIC), ver0);
   }
 
   // Prove that the committed value v ∈ {1, …, T}. Appends a (v, ver) read and
   // a (v, ver+1) write, mirroring a ROM lookup of key v.
-  void prove_member(const SignedInt &v) {
-    uint64_t e = v.reveal<uint64_t>(ALICE);
-    uint64_t vv = (party == ALICE) ? ver[e] : 0;
-    SignedInt ver_old(ver_sz, vv, ALICE);
-    emit_(/*toA=*/true, v, ver_old);                                // read
-    emit_(/*toA=*/false, v, ver_old + SignedInt(ver_sz, 1, PUBLIC));  // write
-    if (party == ALICE)
+  void prove_member(const ZKInt &v) {
+    uint64_t e = zk.reveal_int(v, ALICE).value_or(0);
+    // ver is indexed by the queried value (size T+1). An out-of-range witness
+    // reads a default version (no local OOB) and is rejected by the closing perm
+    // check — a query outside {1..T} chains to no setup write — rather than
+    // aborting the prover here.
+    const bool in_range = (e <= (uint64_t)T);
+    uint64_t vv = (party == ALICE && in_range) ? ver[e] : 0;
+    ZKInt ver_old = zk.input_int(ver_sz, vv, ALICE);
+    emit_(/*toA=*/true, v, ver_old);                                    // read
+    emit_(/*toA=*/false, v, ver_old + zk.input_int(ver_sz, 1, PUBLIC)); // write
+    if (party == ALICE && in_range)
       ver[e] = vv + 1;
   }
 
@@ -55,14 +61,14 @@ public:
   void check() {
     for (int64_t e = 1; e <= T; ++e) {
       uint64_t vv = (party == ALICE) ? ver[e] : 0;
-      emit_(/*toA=*/true, SignedInt(elem_sz, (uint64_t)e, PUBLIC),
-            SignedInt(ver_sz, vv, ALICE));
+      emit_(/*toA=*/true, zk.input_int(elem_sz, (uint64_t)e, PUBLIC),
+            zk.input_int(ver_sz, vv, ALICE));
     }
     perm.check_eq();
   }
 
 private:
-  void emit_(bool toA, const SignedInt &element, const SignedInt &version) {
+  void emit_(bool toA, const ZKInt &element, const ZKInt &version) {
     elem_.clear();
     ramzk_pack_record(bb, {&element, &version}, elem_);
     if (toA)

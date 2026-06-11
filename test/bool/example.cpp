@@ -9,12 +9,12 @@ int port, party;
 const int threads = 1;
 
 void test_circuit_zk(BoolIO *ios[threads], int party) {
-  setup_zk_bool(ios[0], party);
-  SignedInt a(32, 3, ALICE);
-  SignedInt b(32, 2, ALICE);
-  cout << (a - b).reveal<uint32_t>(PUBLIC) << endl;
+  ZKBoolSession sess(ios[0], party);
+  ZKInt a = sess.input_int(32, 3, ALICE);
+  ZKInt b = sess.input_int(32, 2, ALICE);
+  cout << sess.reveal_int(a - b, PUBLIC).value_or(0) << endl;
 
-  finalize_zk_bool();
+  sess.finalize();
 }
 
 int main(int argc, char **argv) {

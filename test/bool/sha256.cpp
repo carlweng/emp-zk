@@ -1,61 +1,71 @@
+// ZK SHA-256: replay the shipped sha256_256 builtin (a full 256-bit message hash)
+// over the ZK boolean context and validate the result bit-for-bit against a
+// ClearCtx replay of the same .empbc — the IR-replay path exercised in zero
+// knowledge. C++20.
+
 #include "../test_io_helpers.h"
+#include "emp-tool/emp-tool.h"
+#include "emp-tool/ir/context/clear.h"
+#include "emp-tool/ir/builtins.h"
+#include "emp-tool/ir/execute.h"
 #include <emp-zk/emp-zk.h>
-#include <iostream>
+#include <cstdio>
+#include <memory>
+#include <span>
+#include <vector>
+
 using namespace emp;
-using namespace std;
-const string circuit_file_location =
-    macro_xstr(EMP_CIRCUIT_PATH) + string("bristol_format/");
+
+int port, party;
 const int threads = 1;
-void get_plain(bool *res, bool *wit, const char *file) {
-  setup_clear_backend();
-  BristolFormat cf(file);
-  vector<Bit> W, P, O;
-  W.resize(cf.n1);
-  for (int i = 0; i < cf.n1; ++i)
-    W[i] = Bit(wit[i], PUBLIC);
-  O.resize(cf.n1);
-  for (int i = 0; i < cf.n1; ++i)
-    O[i] = Bit(false, PUBLIC);
-  cf.compute(O.data(), W.data(), P.data());
-  for (int i = 0; i < 8; ++i)
-    cf.compute(O.data(), O.data(), P.data());
-  for (int i = 0; i < cf.n3; ++i) {
-    res[i] = O[i].reveal<bool>(PUBLIC);
-  }
-  finalize_clear_backend();
+
+static std::vector<ZKWire> feed_wires(ZKBoolSession &sess, int owner,
+                                      const std::vector<uint8_t> &bits) {
+  const int n = (int)bits.size();
+  auto b = std::make_unique<bool[]>((size_t)n);
+  for (int i = 0; i < n; ++i) b[(size_t)i] = bits[(size_t)i] != 0;
+  return sess.input_bits(owner, b.get(), (size_t)n);
 }
+static std::vector<uint8_t> reveal_wires(ZKBoolSession &sess, int recipient,
+                                         const std::vector<ZKWire> &w) {
+  const int n = (int)w.size();
+  auto b = std::make_unique<bool[]>((size_t)n);
+  sess.reveal_bits(b.get(), recipient, w.data(), (size_t)n);
+  std::vector<uint8_t> out((size_t)n);
+  for (int i = 0; i < n; ++i) out[(size_t)i] = b[(size_t)i] ? 1 : 0;
+  return out;
+}
+
 int main(int argc, char **argv) {
-  int party, port;
   parse_party_and_port(argv, &party, &port);
-  string filename = circuit_file_location + string("sha-256.txt");
-  bool *witness = new bool[512];
-  memset(witness, false, 512);
-  bool *output = new bool[256];
-  get_plain(output, witness, filename.c_str());
   BoolIO *ios[threads];
   make_bool_ios(ios, party, port);
 
-  setup_zk_bool(ios[0], party);
-  vector<Bit> W, O;
-  for (int i = 0; i < 512; ++i)
-    W.push_back(Bit(witness[i], ALICE));
-  O.resize(512);
-  for (int i = 0; i < 512; ++i)
-    O[i] = Bit(false, PUBLIC);
+  ZKBoolSession sess(ios[0], party);
+  const circuit::BooleanProgram &prog = circuit::builtin_circuit("sha256_256");
+  const int nin = (int)prog.num_inputs;
 
-  BristolFormat cf(filename.c_str());
-  cf.compute(O.data(), W.data(), (const Bit *)nullptr);
-  for (int i = 0; i < 8; ++i)
-    cf.compute(O.data(), O.data(), (const Bit *)nullptr);
-  for (int i = 0; i < 256; ++i) {
-    bool tmp = O[i].reveal<bool>(PUBLIC);
-    if (tmp != output[i])
+  // Deterministic test message (both parties agree; ALICE owns the witness).
+  std::vector<uint8_t> wit((size_t)nin);
+  for (int i = 0; i < nin; ++i)
+    wit[(size_t)i] = (uint8_t)(((uint32_t)i * 0x9e3779b9u) >> 19) & 1u;
+
+  auto zin = feed_wires(sess, ALICE, wit);
+  auto zout = execute_program(sess.direct_ctx(), prog,
+                              std::span<const ZKWire>(zin.data(), zin.size()));
+  auto zdig = reveal_wires(sess, PUBLIC, zout);
+
+  ClearCtx cctx;
+  auto cout = execute_program(cctx, prog,
+                              std::span<const uint8_t>(wit.data(), (size_t)nin));
+  for (size_t i = 0; i < cout.size(); ++i)
+    if ((zdig[i] & 1) != (cout[i] & 1))
       error("wrong");
-  }
 
-  finalize_zk_bool();
+  sess.finalize();
+  if (party == ALICE)
+    printf("ZK sha256_256 replay (%zu output bits) — PASS\n", cout.size());
 
   destroy_bool_ios(ios);
-
   return 0;
 }

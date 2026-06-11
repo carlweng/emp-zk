@@ -1,7 +1,7 @@
 #ifndef EMP_ZK_PERM_PROOF_H__
 #define EMP_ZK_PERM_PROOF_H__
 
-#include "emp-zk/emp-zk-bool/zk_bool_base.h"
+#include "emp-zk/emp-zk-bool/zk_session.h"
 #include <array>
 #include <memory>
 
@@ -201,8 +201,8 @@ public:
   // first product, batch-checked in check_eq.
   std::unique_ptr<RamPolyPrdt> polyprdt;
 
-  explicit ZKPermProof(int64_t payload_bits = 128)
-      : bb(get_bool_backend()), n_blocks((payload_bits + 127) / 128) {}
+  explicit ZKPermProof(ZKBoolSession &sess, int64_t payload_bits = 128)
+      : bb(&sess.engine()), n_blocks((payload_bits + 127) / 128) {}
 
   // Append one element. The pointer form reads n_blocks consecutive wires;
   // the reference form is a convenience for single-wire payloads (≤128 bits).
@@ -348,12 +348,12 @@ private:
 // public or private wires. The shared bit→f2k conversion for the
 // permutation-based RAM/ROM/set data structures.
 inline void ramzk_pack_record(ZKBoolBase *bb,
-                              std::initializer_list<const SignedInt *> parts,
+                              std::initializer_list<const ZKInt *> parts,
                               vector<F2kAuthValue> &out) {
   vector<block> wire;
-  for (const SignedInt *p : parts) {
-    const block *b = (const block *)p->bits.data();
-    wire.insert(wire.end(), b, b + p->bits.size());
+  for (const ZKInt *p : parts) {
+    std::vector<block> pb = int_blocks(*p);   // copy each wire's block out
+    wire.insert(wire.end(), pb.begin(), pb.end());
   }
   const int64_t total = (int64_t)wire.size();
   const int64_t mblk = (total + 127) / 128;

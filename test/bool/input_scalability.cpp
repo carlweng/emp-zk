@@ -13,29 +13,29 @@ void test_circuit_zk(BoolIO *ios[threads], int party, int log_trial) {
   long long input_sz = 1 << log_trial;
   if (input_sz < 100000000LL) {
     auto start = clock_start();
-    setup_zk_bool(ios[0], party);
-    SignedInt *a = new SignedInt[input_sz / 32];
+    ZKBoolSession sess(ios[0], party);
+    ZKInt *a = new ZKInt[input_sz / 32];
     for (int i = 0; i < input_sz / 32; ++i)
-      a[i] = SignedInt(32, i, ALICE);
+      a[i] = sess.input_int(32, i, ALICE);
 
-    a[0][0].reveal<bool>(PUBLIC);
-    finalize_zk_bool();
+    sess.reveal(a[0][0], PUBLIC);
+    sess.finalize();
     double timeused = time_from(start);
     cout << input_sz << "\t" << timeused << endl;
     delete[] a;
   } else {
     long long unit = 1 << 24;
     auto start = clock_start();
-    setup_zk_bool(ios[0], party);
+    ZKBoolSession sess(ios[0], party);
     int round = input_sz / unit;
-    SignedInt **a = (SignedInt **)malloc(round * sizeof(Bit *));
+    ZKInt **a = (ZKInt **)malloc(round * sizeof(ZKInt *));
     for (int i = 0; i < round; ++i) {
-      a[i] = new SignedInt[unit];
+      a[i] = new ZKInt[unit];
       for (int j = 0; j < unit / 32; ++j)
-        a[i][j] = SignedInt(32, j, ALICE);
+        a[i][j] = sess.input_int(32, j, ALICE);
     }
-    a[0][0][0].reveal<bool>(PUBLIC);
-    finalize_zk_bool();
+    sess.reveal(a[0][0][0], PUBLIC);
+    sess.finalize();
     double timeused = time_from(start);
     cout << input_sz << "\t" << timeused << endl;
     for (int i = 0; i < 8; ++i)

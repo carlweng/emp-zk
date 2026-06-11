@@ -5,13 +5,10 @@
 
 #include "emp-tool/emp-tool.h"
 #include "emp-zk/emp-zk-bool/bool_io.h"
+#include "emp-zk/emp-zk-bool/zk_session.h"
 
 namespace emp {
-using block_types::Bit;
-using block_types::SignedInt;
 using namespace std;
-
-using namespace emp;
 
 // AuthValue accessors (val-first layout: val in low 64, mac in high 64).
 #define VAL(x) _mm_extract_epi64((block)x, 0)
@@ -19,16 +16,15 @@ using namespace emp;
 
 class DoubAuthHelper {
 public:
+  ZKBoolSession &zk;     // bool session: source of reveal_int + the bool engine
   int party;
   BoolIO *io;
   Hash hash;
   block delta_f2;
   __uint128_t delta_fp;
 
-  DoubAuthHelper(int party, BoolIO *io) {
-    this->party = party;
-    this->io = io;
-  }
+  DoubAuthHelper(ZKBoolSession &zk, BoolIO *io)
+      : zk(zk), party(zk.party()), io(io) {}
 
   void set_delta(block delta_f2, __uint128_t delta_fp) {
     this->delta_f2 = delta_f2;
@@ -62,19 +58,19 @@ public:
   // here. The earlier hand-rolled bitset version drove identical
   // hash transcripts in both checks; the simpler form below preserves
   // that invariant because both sides land at the same plaintext.
-  void open_check_send(uint64_t *val, SignedInt *dat_f2, int64_t len) {
+  void open_check_send(uint64_t *val, ZKInt *dat_f2, int64_t len) {
     for (int64_t i = 0; i < len; ++i)
-      val[i] = dat_f2[i].reveal<uint64_t>(PUBLIC);
+      val[i] = zk.reveal_int(dat_f2[i], PUBLIC).value_or(0);
   }
 
-  void open_check_recv(uint64_t *val, SignedInt *dat_f2, int64_t len) {
+  void open_check_recv(uint64_t *val, ZKInt *dat_f2, int64_t len) {
     for (int64_t i = 0; i < len; ++i)
-      val[i] = dat_f2[i].reveal<uint64_t>(PUBLIC);
+      val[i] = zk.reveal_int(dat_f2[i], PUBLIC).value_or(0);
   }
 
   /* --------------------- open and check ----------------------*/
 
-  void open_check_send(SignedInt *dat_f2, __uint128_t *dat_fp, int64_t len) {
+  void open_check_send(ZKInt *dat_f2, __uint128_t *dat_fp, int64_t len) {
     std::vector<uint64_t> val(len);
     for (int64_t i = 0; i < len; ++i) {
       val[i] = VAL(dat_fp[i]);
@@ -83,12 +79,14 @@ public:
     }
     io->send_data(val.data(), len * sizeof(uint64_t));
     io->flush();
-    int bit_len = dat_f2[0].size();
-    for (int64_t i = 0; i < len; ++i)
-      hash.put_block((block *)dat_f2[i].bits.data(), bit_len);
+    int bit_len = (int)dat_f2[0].width();
+    for (int64_t i = 0; i < len; ++i) {
+      std::vector<block> b = int_blocks(dat_f2[i]);
+      hash.put_block(b.data(), bit_len);
+    }
   }
 
-  void open_check_recv(SignedInt *dat_f2, __uint128_t *dat_fp, int64_t len) {
+  void open_check_recv(ZKInt *dat_f2, __uint128_t *dat_fp, int64_t len) {
     std::vector<uint64_t> val(len);
     io->recv_data(val.data(), len * sizeof(uint64_t));
     for (int64_t i = 0; i < len; ++i) {
@@ -96,15 +94,16 @@ public:
       tmp = add_mod(MAC(dat_fp[i]), tmp);
       hash.put(&tmp, sizeof(uint64_t));
     }
-    int bit_len = dat_f2[0].size();
+    int bit_len = (int)dat_f2[0].width();
     std::vector<block> auth_f2(bit_len);
     for (int64_t i = 0; i < len; ++i) {
+      std::vector<block> b = int_blocks(dat_f2[i]);
       std::bitset<64> bs(val[i]);
       for (int j = 0; j < bit_len; ++j) {
         if (bs[j])
-          auth_f2[j] = dat_f2[i].bits[j].bit ^ delta_f2;
+          auth_f2[j] = b[j] ^ delta_f2;
         else
-          auth_f2[j] = dat_f2[i].bits[j].bit;
+          auth_f2[j] = b[j];
       }
       hash.put_block(auth_f2.data(), bit_len);
     }

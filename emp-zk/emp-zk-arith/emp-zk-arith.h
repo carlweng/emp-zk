@@ -13,35 +13,32 @@
 namespace emp {
 using namespace std;
 
-inline void setup_zk_arith(BoolIO *io, int party,
-                           bool enable_conversion = false) {
-  if (enable_conversion) {
-    if (emp::backend == nullptr) {
-      error("Boolean ZK backend is not set up!\n");
-    }
-  }
-
+// Arithmetic-only setup (no bool<->arith conversion).
+inline void setup_zk_arith(BoolIO *io, int party) {
   if (party == ALICE) {
     ZKFpExec::zk_exec = new ZKFpExecPrv(io);
     FpPolyProof::fppolyproof =
         new FpPolyProof(ALICE, io,
                             ((ZKFpExecPrv *)(ZKFpExec::zk_exec))->ostriple);
-
-    if (enable_conversion)
-      EdaBits::conv = new EdaBits(
-          ALICE, io,
-          ((ZKFpExecPrv *)(ZKFpExec::zk_exec))->ostriple->vole);
-
   } else {
     ZKFpExec::zk_exec = new ZKFpExecVer(io);
     FpPolyProof::fppolyproof = new FpPolyProof(
         BOB, io, ((ZKFpExecVer *)(ZKFpExec::zk_exec))->ostriple);
-    if (enable_conversion) {
-      EdaBits::conv = new EdaBits(
-          BOB, io,
-          ((ZKFpExecVer *)(ZKFpExec::zk_exec))->ostriple->vole);
-      EdaBits::conv->install_boolean(emp::get_bool_delta());
-    }
+  }
+}
+
+// Setup with bool<->arith conversion. `bool_sess` is the live ZKBoolSession the
+// conversion shares (its engine / Δ); the caller keeps it alive until after
+// finalize_zk_arith(). Replaces the old `enable_conversion` flag + global backend.
+inline void setup_zk_arith(BoolIO *io, int party, ZKBoolSession &bool_sess) {
+  setup_zk_arith(io, party);
+  if (party == ALICE) {
+    EdaBits::conv = new EdaBits(
+        bool_sess, io, ((ZKFpExecPrv *)(ZKFpExec::zk_exec))->ostriple->vole);
+  } else {
+    EdaBits::conv = new EdaBits(
+        bool_sess, io, ((ZKFpExecVer *)(ZKFpExec::zk_exec))->ostriple->vole);
+    EdaBits::conv->install_boolean(bool_sess.engine().delta);
   }
 }
 

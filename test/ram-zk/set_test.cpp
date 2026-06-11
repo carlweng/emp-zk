@@ -13,23 +13,23 @@ const int threads = 1;
 // must pass; a single out-of-range query must make the verifier abort
 // (Yang–Heath §4.2 / Remark 1).
 void test(BoolIO *ios[threads], int party, bool bad) {
-  setup_zk_bool(ios[0], party);
+  ZKBoolSession sess(ios[0], party);
   int64_t T = 64;
   int elem_sz = (int)ramzk_bits_for(T);
 
-  ZKSet *s = new ZKSet(party, T, elem_sz);
+  ZKSet *s = new ZKSet(sess, T, elem_sz);
 
   // Query each element of {1..T}, several elements repeatedly (chains).
   for (int rep = 0; rep < 3; ++rep)
     for (int64_t e = 1; e <= T; ++e)
-      s->prove_member(SignedInt(elem_sz, (uint64_t)e, ALICE));
+      s->prove_member(sess.input_int(elem_sz, (uint64_t)e, ALICE));
 
   // Soundness: 0 ∉ {1..T}, so this query cannot be chained to a setup write.
   if (bad)
-    s->prove_member(SignedInt(elem_sz, (uint64_t)0, ALICE));
+    s->prove_member(sess.input_int(elem_sz, (uint64_t)0, ALICE));
 
   s->check();
-  finalize_zk_bool();
+  sess.finalize();
   cout << "ZKSet ok (T=" << T << ")  party " << party << endl;
 }
 

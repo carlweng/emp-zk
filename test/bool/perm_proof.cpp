@@ -13,10 +13,10 @@ const int W = 64;   // bit width of each fed value
 // Build a valid authenticated f2k wire from a fresh ALICE-input value: feed W
 // authenticated bits and pack them into one F(2^128) element via the local
 // Σ·Xⁱ map (mac from the bit wires, val from the cleartext LSBs).
-static F2kAuthValue make_wire(uint64_t v) {
-  SignedInt x(W, v, ALICE);
+static F2kAuthValue make_wire(ZKBoolSession &sess, uint64_t v) {
+  ZKInt x = sess.input_int(W, v, ALICE);
   vector<F2kAuthValue> out;
-  ramzk_pack_record(get_bool_backend(), {&x}, out);
+  ramzk_pack_record(&sess.engine(), {&x}, out);
   return out[0];
 }
 
@@ -25,7 +25,7 @@ static F2kAuthValue make_wire(uint64_t v) {
 // one wire of B so the multiset no longer matches.
 void test_perm(BoolIO *ios[threads], int party, int n, int bits,
                const string &mode) {
-  setup_zk_bool(ios[0], party);
+  ZKBoolSession sess(ios[0], party);
   const int m = (bits + 127) / 128;
   const bool bad = (mode == "bad");
   // "periodic" exercises explicit per-batch compress(): each fold draws its
@@ -37,10 +37,10 @@ void test_perm(BoolIO *ios[threads], int party, int n, int bits,
   for (int i = 0; i < n; ++i)
     for (int j = 0; j < m; ++j)
       elems[(size_t)i * m + j] =
-          make_wire(((uint64_t)i * 2654435761ull + 7) ^ ((uint64_t)j << 40));
+          make_wire(sess, ((uint64_t)i * 2654435761ull + 7) ^ ((uint64_t)j << 40));
 
   auto start = clock_start();
-  ZKPermProof perm(bits);
+  ZKPermProof perm(sess, bits);
   const int chunk = (n >= 4) ? n / 4 : n;
   for (int i = 0; i < n; ++i) {
     perm.add_A(&elems[(size_t)i * m]);
@@ -48,7 +48,7 @@ void test_perm(BoolIO *ios[threads], int party, int n, int bits,
     if (bad && i == 0) {
       F2kAuthValue e[8];                  // corrupt one element's first wire
       for (int j = 0; j < m; ++j) e[j] = elems[(size_t)src * m + j];
-      e[0] = make_wire(0xDEADBEEFull);
+      e[0] = make_wire(sess, 0xDEADBEEFull);
       perm.add_B(e);
     } else {
       perm.add_B(&elems[(size_t)src * m]);
@@ -58,7 +58,7 @@ void test_perm(BoolIO *ios[threads], int party, int n, int bits,
   perm.check_eq();   // passes iff B is a permutation of A
   double t = time_from(start);
 
-  finalize_zk_bool();
+  sess.finalize();
   cout << "perm check (n=" << n << ", bits=" << bits << " [" << m << " blk]"
        << (mode.empty() ? "" : ", " + mode) << ") PASSED\t" << t
        << " us\tparty " << party << endl;

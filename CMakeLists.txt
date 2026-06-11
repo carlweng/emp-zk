@@ -38,22 +38,16 @@ add_library(emp-zk STATIC
     emp-zk/emp-zk-arith/emp-zk-arith.cpp)
 add_library(emp-zk::emp-zk ALIAS emp-zk)
 
-target_compile_features(emp-zk PUBLIC cxx_std_17)
+# emp-zk-bool is a native C++20 BooleanContext (ZKBoolContext / ZKBoolSession);
+# C++20 is also inherited transitively via emp-ot/emp-tool. Declared here for an
+# honest export contract.
+target_compile_features(emp-zk PUBLIC cxx_std_20)
 
 target_include_directories(emp-zk PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
 target_link_libraries(emp-zk PUBLIC emp-ot::emp-ot)
-
-# Some bool tests load Bristol-format circuits from
-# emp-tool/circuits/files via macro_xstr(EMP_CIRCUIT_PATH). emp-tool
-# main no longer defines this; derive it from the imported emp-tool
-# include directory (mirrors emp-sh2pc's CMakeLists.txt).
-get_target_property(_emp_tool_inc emp-tool::emp-tool INTERFACE_INCLUDE_DIRECTORIES)
-list(GET _emp_tool_inc 0 _emp_tool_inc0)
-target_compile_definitions(emp-zk PUBLIC
-    EMP_CIRCUIT_PATH=${_emp_tool_inc0}/emp-tool/circuits/files/)
 
 # ---------------------------------------------------------------------
 # Install + export

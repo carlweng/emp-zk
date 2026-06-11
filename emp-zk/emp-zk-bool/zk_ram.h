@@ -40,43 +40,44 @@ public:
   int64_t clock = 1;               // public; setup writes are time 0
   vector<uint64_t> mem;            // ALICE: current value per cell
   vector<uint64_t> last_t;         // ALICE: time of last write per cell
+  ZKBoolSession &zk;               // owns the engine; source of input_int / reveal_int
   ZKBoolBase *bb;
   ZKPermProof perm;                // shuffle 1: reads ∼ writes
   ZKSet *diffs = nullptr;      // shuffle 2 (read/write only): clock−t in {1..T}
   vector<F2kAuthValue> elem_;
 
-  ZKRam(int party, int64_t index_sz, int64_t val_sz, int64_t T,
+  ZKRam(ZKBoolSession &sess, int64_t index_sz, int64_t val_sz, int64_t T,
         bool read_only = false)
-      : party(party), read_only(read_only), index_sz(index_sz), val_sz(val_sz),
-        T(T), time_sz(ramzk_bits_for(T)), bb(get_bool_backend()),
-        perm(index_sz + val_sz + time_sz) {
+      : party(sess.party()), read_only(read_only), index_sz(index_sz),
+        val_sz(val_sz), T(T), time_sz(ramzk_bits_for(T)), zk(sess),
+        bb(&sess.engine()), perm(sess, index_sz + val_sz + time_sz) {
     if (!read_only)
-      diffs = new ZKSet(party, T, time_sz);
+      diffs = new ZKSet(sess, T, time_sz);
   }
 
   ~ZKRam() { delete diffs; }
 
   // Setup: commit the initial contents and emit a write (i, x[i], 0) per cell.
-  void init(vector<SignedInt> &content) {
+  void init(vector<ZKInt> &content) {
     n = (int64_t)content.size();
     if (party == ALICE) {
       mem.resize(n);
       last_t.assign(n, 0);
     }
-    SignedInt time0(time_sz, (uint64_t)0, PUBLIC);
+    ZKInt time0 = zk.input_int(time_sz, 0, PUBLIC);
     for (int64_t i = 0; i < n; ++i) {
       if (party == ALICE)
-        mem[i] = content[i].reveal<uint64_t>(ALICE);
+        mem[i] = zk.reveal_int(content[i], ALICE).value_or(0);
       else
-        content[i].reveal<uint64_t>(ALICE);
-      emit_(/*toA=*/false, content[i], SignedInt(index_sz, (uint64_t)i, PUBLIC),
-            time0);
+        zk.reveal_int(content[i], ALICE);
+      emit_(/*toA=*/false, content[i],
+            zk.input_int(index_sz, (uint64_t)i, PUBLIC), time0);
     }
   }
 
-  SignedInt read(const SignedInt &index) { return access_(index, index, false); }
+  ZKInt read(const ZKInt &index) { return access_(index, index, false); }
 
-  void write(const SignedInt &index, const SignedInt &value) {
+  void write(const ZKInt &index, const ZKInt &value) {
     if (read_only)
       error("ZKRam: write() on read-only memory");
     access_(index, value, true);
@@ -87,8 +88,9 @@ public:
     for (int64_t i = 0; i < n; ++i) {
       uint64_t v = (party == ALICE) ? mem[i] : 0;
       uint64_t t = (party == ALICE) ? last_t[i] : 0;
-      emit_(/*toA=*/true, SignedInt(val_sz, v, ALICE),
-            SignedInt(index_sz, (uint64_t)i, PUBLIC), SignedInt(time_sz, t, ALICE));
+      emit_(/*toA=*/true, zk.input_int(val_sz, v, ALICE),
+            zk.input_int(index_sz, (uint64_t)i, PUBLIC),
+            zk.input_int(time_sz, t, ALICE));
     }
     perm.check_eq();
     if (!read_only)
@@ -98,39 +100,45 @@ public:
 private:
   // One access. `value` is the new contents on a store; ignored on a load
   // (where we pass `index` as a harmless placeholder). Returns the old value.
-  SignedInt access_(const SignedInt &index, const SignedInt &value, bool is_write) {
-    uint64_t ci = index.reveal<uint64_t>(ALICE);
+  ZKInt access_(const ZKInt &index, const ZKInt &value, bool is_write) {
+    uint64_t ci = zk.reveal_int(index, ALICE).value_or(0);
+    // An index_sz-bit witness can exceed the cell count. Avoid a local OOB by
+    // reading defaults for an out-of-range index and letting the closing
+    // permutation check reject (the bogus read matches no write) — a
+    // verifier-observed failure rather than a prover-side abort.
+    const bool in_range = (ci < (uint64_t)n);
     uint64_t v_old = 0, t_old = 0;
-    if (party == ALICE) {
+    if (party == ALICE && in_range) {
       v_old = mem[ci];
       t_old = last_t[ci];
     }
-    SignedInt old(val_sz, v_old, ALICE);
-    SignedInt time_old(time_sz, t_old, ALICE);
+    ZKInt old = zk.input_int(val_sz, v_old, ALICE);
+    ZKInt time_old = zk.input_int(time_sz, t_old, ALICE);
 
     // shuffle 2: prove the last write to this cell is in the past.
     if (!read_only) {
-      SignedInt diff = SignedInt(time_sz, (uint64_t)clock, PUBLIC) - time_old;
+      ZKInt diff = zk.input_int(time_sz, (uint64_t)clock, PUBLIC) - time_old;
       diffs->prove_member(diff);
     }
 
     // shuffle 1: read the old (addr, value, time), write back the new state.
     emit_(/*toA=*/true, old, index, time_old);
-    SignedInt newv = is_write ? value : old;
-    emit_(/*toA=*/false, newv, index, SignedInt(time_sz, (uint64_t)clock, PUBLIC));
+    ZKInt newv = is_write ? value : old;
+    emit_(/*toA=*/false, newv, index,
+          zk.input_int(time_sz, (uint64_t)clock, PUBLIC));
 
     if (party == ALICE) {
-      mem[ci] = is_write ? value.reveal<uint64_t>(ALICE) : v_old;
-      last_t[ci] = clock;
+      uint64_t nv = is_write ? zk.reveal_int(value, ALICE).value_or(0) : v_old;
+      if (in_range) { mem[ci] = nv; last_t[ci] = clock; }
     } else if (is_write) {
-      value.reveal<uint64_t>(ALICE);   // keep the two parties' reveals in lockstep
+      zk.reveal_int(value, ALICE);   // keep the two parties' reveals in lockstep
     }
     ++clock;
     return old;
   }
 
-  void emit_(bool toA, const SignedInt &value, const SignedInt &index,
-             const SignedInt &time) {
+  void emit_(bool toA, const ZKInt &value, const ZKInt &index,
+             const ZKInt &time) {
     elem_.clear();
     ramzk_pack_record(bb, {&value, &index, &time}, elem_);
     if (toA)
@@ -146,8 +154,8 @@ private:
 // of read() lookups. read() returns the looked-up value; write() is illegal.
 class ZKROM : public ZKRam {
 public:
-  ZKROM(int party, int64_t index_sz, int64_t val_sz, int64_t T)
-      : ZKRam(party, index_sz, val_sz, T, /*read_only=*/true) {}
+  ZKROM(ZKBoolSession &sess, int64_t index_sz, int64_t val_sz, int64_t T)
+      : ZKRam(sess, index_sz, val_sz, T, /*read_only=*/true) {}
 };
 
 } // namespace emp

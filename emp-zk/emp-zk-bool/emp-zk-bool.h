@@ -1,67 +1,89 @@
 #ifndef EMP_ZK_BOOL_H__
 #define EMP_ZK_BOOL_H__
+
+// emp-zk-bool public surface. A proof is driven through a ZKBoolSession
+// (zk_session.h) — the public handle that owns the engine, is the I/O boundary,
+// and is passed explicitly to every gadget. There is no global backend and no
+// setup_zk_bool/finalize_zk_bool; construct a ZKBoolSession and call
+// sess.finalize() to run the closing checks.
+
+#include "emp-zk/emp-zk-bool/zk_session.h"
 #include "emp-zk/emp-zk-bool/polynomial.h"
-#include "emp-zk/emp-zk-bool/zk_bool_base.h"
 
 namespace emp {
 using namespace std;
 
-inline void setup_zk_bool(BoolIO *io, int party) {
-  if (party == ALICE)
-    backend = new ZKBoolProver(io);
-  else
-    backend = new ZKBoolVerifier(io);
+// --- polynomial-proof entry points -----------------------------------------
+// Statement bits/ints are ZKBit/ZKInt; the proof gadget (PolyProof) runs on raw
+// authenticated blocks, so these copy the wires out at the boundary (the old
+// (block*)Bit* cast is no longer valid — a ZKBit also carries a context ptr).
+
+inline void zkp_poly_deg2(ZKBoolSession &sess, ZKBit *x, ZKBit *y, bool *coeff,
+                          int64_t len) {
+  std::vector<block> xb((size_t)len), yb((size_t)len);
+  for (int64_t i = 0; i < len; ++i) { xb[i] = bit_block(x[i]); yb[i] = bit_block(y[i]); }
+  sess.engine().polyproof->zkp_poly_deg2(xb.data(), yb.data(), coeff, len);
 }
 
-// Verifier-only. Returns the global MAC secret Δ. Only the verifier
-// holds it; calling on the prover side is a programmer error.
-inline block get_bool_delta() { return get_bool_backend_ver()->delta; }
-
-inline void sync_zk_bool() { get_bool_backend()->io->flush(); }
-
-inline void finalize_zk_bool() {
-  delete backend;
-  backend = nullptr;
+inline void zkp_inner_prdt(ZKBoolSession &sess, ZKBit *x, ZKBit *y, bool constant,
+                           int64_t len) {
+  std::vector<block> xb((size_t)len), yb((size_t)len);
+  for (int64_t i = 0; i < len; ++i) { xb[i] = bit_block(x[i]); yb[i] = bit_block(y[i]); }
+  sess.engine().polyproof->zkp_inner_prdt(xb.data(), yb.data(), constant, len);
 }
 
-inline void zkp_poly_deg2(Bit *x, Bit *y, bool *coeff, int64_t len) {
-  get_bool_backend()->polyproof->zkp_poly_deg2((block *)x, (block *)y, coeff,
-                                               len);
+inline void zkp_inner_prdt_eq(ZKBoolSession &sess, ZKBit *x, ZKBit *y, ZKBit *r,
+                              ZKBit *s, int64_t len, int64_t len2) {
+  std::vector<block> xb((size_t)len), yb((size_t)len), rb((size_t)len2), sb((size_t)len2);
+  for (int64_t i = 0; i < len; ++i)  { xb[i] = bit_block(x[i]); yb[i] = bit_block(y[i]); }
+  for (int64_t i = 0; i < len2; ++i) { rb[i] = bit_block(r[i]); sb[i] = bit_block(s[i]); }
+  sess.engine().polyproof->zkp_inner_prdt_eq(xb.data(), yb.data(), rb.data(),
+                                             sb.data(), len, len2);
 }
 
-inline void zkp_inner_prdt(Bit *x, Bit *y, bool constant, int64_t len) {
-  get_bool_backend()->polyproof->zkp_inner_prdt((block *)x, (block *)y,
-                                                constant, len);
-}
-
-inline void zkp_inner_prdt_eq(Bit *x, Bit *y, Bit *r, Bit *s, int64_t len,
+inline void zkp_inner_prdt_eq(ZKBoolSession &sess, ZKBit *x, ZKBit *y, ZKBit *r,
+                              ZKBit *s, ZKBit *rr, ZKBit *ss, int64_t len,
                               int64_t len2) {
-  get_bool_backend()->polyproof->zkp_inner_prdt_eq(
-      (block *)x, (block *)y, (block *)r, (block *)s, len, len2);
+  std::vector<block> xb((size_t)len), yb((size_t)len), rb((size_t)len2), sb((size_t)len2);
+  for (int64_t i = 0; i < len; ++i)  { xb[i] = bit_block(x[i]); yb[i] = bit_block(y[i]); }
+  for (int64_t i = 0; i < len2; ++i) { rb[i] = bit_block(r[i]); sb[i] = bit_block(s[i]); }
+  block rrb = bit_block(*rr), ssb = bit_block(*ss);
+  sess.engine().polyproof->zkp_inner_prdt_eq(xb.data(), yb.data(), rb.data(),
+                                             sb.data(), &rrb, &ssb, len, len2);
 }
 
-inline void zkp_inner_prdt_eq(Bit *x, Bit *y, Bit *r, Bit *s, Bit *rr, Bit *ss,
-                              int64_t len, int64_t len2) {
-  get_bool_backend()->polyproof->zkp_inner_prdt_eq(
-      (block *)x, (block *)y, (block *)r, (block *)s, (block *)rr, (block *)ss,
-      len, len2);
-}
-
-inline void zkp_inner_prdt_multi(SignedInt *x, SignedInt *y, Bit *r, Bit *s,
-                                 int64_t len, int64_t width) {
-  get_bool_backend()->polyproof->zkp_inner_prdt_multi(x, y, r, s, len, width);
+// Relocated from PolyProof (polynomial.h is engine-level / typed-layer-free):
+// drives PolyProof's public accumulate_*/buffer/num over typed ZKInt/ZKBit.
+inline void zkp_inner_prdt_multi(ZKBoolSession &sess, ZKInt *polyx, ZKInt *polyy,
+                                 ZKBit *r, ZKBit *s, int64_t len, int64_t in_width) {
+  PolyProof *pp = sess.engine().polyproof;
+  const int party = sess.party();
+  for (int64_t width = 0; width < in_width; ++width) {
+    if (pp->num >= PolyProof::buffer_sz)
+      pp->batch_check();
+    if (party == ALICE) {
+      block A0 = zero_block, A1 = zero_block;
+      for (int64_t i = 0; i < len; ++i)
+        pp->accumulate_alice(polyx[i][width].w.label, polyy[0][i].w.label, A0, A1);
+      pp->accumulate_alice(r[width].w.label, s->w.label, A0, A1);
+      pp->buffer[pp->num] = A0;
+      pp->buffer1[pp->num] = A1;
+    } else {
+      block B = zero_block;
+      for (int64_t i = 0; i < len; ++i)
+        pp->accumulate_bob(polyx[i][width].w.label, polyy[0][i].w.label, B);
+      pp->accumulate_bob(r[width].w.label, s->w.label, B);
+      pp->buffer[pp->num] = B;
+    }
+    pp->num++;
+  }
 }
 
 } // namespace emp
 
-// Multiset permutation-check gadget (the core of VOLE-ZK RAM/ROM). Generic
-// over f2k wires; depends only on the backend above.
+// Multiset permutation-check gadget (the core of VOLE-ZK RAM/ROM), then the
+// RAM/ROM and set data structures. All take a ZKBoolSession& explicitly.
 #include "emp-zk/emp-zk-bool/zk_perm_proof.h"
-
-// RAM-ZK circuits build directly on this backend — they call
-// get_bool_backend(), sync_zk_bool(), and the f2k wire ops above — so they
-// live here rather than as a separate module. Included after the namespace
-// block so sync_zk_bool() is already declared.
 #include "emp-zk/emp-zk-bool/zk_set.h"
 #include "emp-zk/emp-zk-bool/zk_ram.h"
 

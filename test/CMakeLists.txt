@@ -22,15 +22,20 @@ endfunction()
 
 # Boolean ZK
 add_test_case_with_run(bool example)
+# A BooleanContext circuit run in ZK (ZKBoolContext / ZKBoolSession), validated
+# bit-for-bit against a ClearCtx replay of the same circuit.
+add_test_case_with_run(bool test_context_zk)
 add_test_case_with_run(bool bool_io)
-add_test_case_with_run(bool memory_scalability)
 add_test_case_with_run(bool input_scalability)
 add_test_case_with_run(bool circuit_scalability)
 add_test_case_with_run(bool f2k_scalability)
 add_test_case_with_run(bool perm_proof)
-add_test_case_with_run(bool sha256)
 add_test_case_with_run(bool polynomial)
 add_test_case_with_run(bool inner_prdt)
+# ZK SHA-256 and memory/throughput on the IR-replay model: the sha256_256 builtin
+# replayed over the ZK context and validated against a ClearCtx replay.
+add_test_case_with_run(bool sha256)
+add_test_case_with_run(bool memory_scalability)
 
 # Arithmetic ZK
 add_test_case_with_run(arith abconversion)

@@ -25,7 +25,7 @@ public:
   BoolIO *io;
 
   block delta_f2;
-  std::vector<SignedInt> bool_candidate;
+  std::vector<ZKInt> bool_candidate;
   __uint128_t delta_fp;
   std::vector<__uint128_t> arith_candidate;
 
@@ -43,10 +43,11 @@ public:
   uint32_t ell;
   uint32_t Bm1, ell_faulty;
 
-  SignedInt int_boo_pr, int_boo_zero, int_boo_pr_plus_two;
+  ZKInt int_boo_pr, int_boo_zero, int_boo_pr_plus_two;
+  ZKBoolSession &zk;   // bool session: input_int + the bool engine
 
-  EdaBits(int party, BoolIO *io, FpVOLE<AuthValueFp> *cot_fp) {
-    this->party = party;
+  EdaBits(ZKBoolSession &zk, BoolIO *io, FpVOLE<AuthValueFp> *cot_fp) : zk(zk) {
+    this->party = zk.party();
     this->io = io;
     this->cot_fp = cot_fp;
     if (party == BOB) {
@@ -67,11 +68,11 @@ public:
     this->Bm1 = B - 1;
     bool_candidate.resize(ell);
 
-    auth_helper = new DoubAuthHelper(party, io);
+    auth_helper = new DoubAuthHelper(zk, io);
 
-    int_boo_pr = SignedInt(62, PR, PUBLIC);
-    int_boo_zero = SignedInt(62, 0, PUBLIC);
-    int_boo_pr_plus_two = SignedInt(62, PR + 2, PUBLIC); // TODO why????
+    int_boo_pr = zk.input_int(62, PR, PUBLIC);
+    int_boo_zero = zk.input_int(62, 0, PUBLIC);
+    int_boo_pr_plus_two = zk.input_int(62, PR + 2, PUBLIC); // TODO why????
   }
 
   ~EdaBits() {
@@ -98,13 +99,13 @@ public:
     // Input \ell Fp shares into boolean circuits
     if (party == ALICE) {
       for (uint32_t i = 0; i < ell; ++i)
-        bool_candidate[i] = SignedInt(
+        bool_candidate[i] = zk.input_int(
             62, VAL(arith_candidate[np_pt + i]), ALICE);
     } else {
       for (uint32_t i = 0; i < ell; ++i)
-        bool_candidate[i] = SignedInt(62, 0, ALICE);
+        bool_candidate[i] = zk.input_int(62, 0, ALICE);
     }
-    get_bool_backend()->io->flush();
+    zk.flush();
 
     // Generate a random point to do the permutation
     rand_pt = random_point(ell_faulty);
@@ -121,7 +122,7 @@ public:
     uint32_t buc_start = fp_index(np_pt + N + rand_pt + C);
     uint32_t buc_start1 = f2_index(rand_pt + N + C);
     std::vector<__uint128_t> fp_to_check(N);
-    std::vector<SignedInt> f2_to_check(N);
+    std::vector<ZKInt> f2_to_check(N);
     for (uint32_t j = 0; j < Bm1; ++j) { // TODO parameter
       uint32_t ifp0 = np_pt;
       uint32_t ifp1 = fp_index(buc_start + j);
@@ -132,12 +133,12 @@ public:
         ifp1 = fp_index(ifp1 + Bm1);
         f2_to_check[i] = bool_candidate[i] + bool_candidate[if21];
         f2_to_check[i] = f2_to_check[i].select(
-            f2_to_check[i].bits[61], f2_to_check[i] + int_boo_pr_plus_two);
+            f2_to_check[i][61], f2_to_check[i] + int_boo_pr_plus_two);
         if21 = f2_index(if21 + Bm1);
         // TODO boolean addition and selection costs a lot, and it should be
         // subtraction
       }
-      emp::get_bool_backend()->io->flush();
+      zk.flush();
       if (party == ALICE)
         auth_helper->open_check_send(f2_to_check.data(), fp_to_check.data(), N);
       else
@@ -151,14 +152,14 @@ public:
     // us/edabits" << std::endl;
   }
 
-  __uint128_t bool2arith(SignedInt in) {
+  __uint128_t bool2arith(ZKInt in) {
     uint32_t edab_f2, edab_fp;
     uint64_t diff;
-    SignedInt diff_bool;
+    ZKInt diff_bool;
 
     next_edabits(edab_f2, edab_fp);
     diff_bool = in - bool_candidate[edab_f2];
-    diff_bool = diff_bool.select(diff_bool.bits[61], diff_bool + int_boo_pr);
+    diff_bool = diff_bool.select(diff_bool[61], diff_bool + int_boo_pr);
 
     if (party == ALICE)
       auth_helper->open_check_send(&diff, &diff_bool, 1);
@@ -167,7 +168,7 @@ public:
     return intfp_add_const(arith_candidate[edab_fp], diff);
   }
 
-  void bool2arith(__uint128_t *out, const SignedInt *in, int64_t len) {
+  void bool2arith(__uint128_t *out, const ZKInt *in, int64_t len) {
     int64_t off = 0;
     while (off < len) {
       // Cap each chunk at the edabits remaining in the current buffer
@@ -180,11 +181,11 @@ public:
       uint32_t edab_f2;
       std::vector<uint32_t> edab_fp(num);
       std::vector<uint64_t> diff(num);
-      std::vector<SignedInt> diff_bool(num);
+      std::vector<ZKInt> diff_bool(num);
       for (int64_t i = 0; i < num; ++i) {
         next_edabits(edab_f2, edab_fp[i]);
         diff_bool[i] = in[off + i] - bool_candidate[edab_f2];
-        diff_bool[i] = diff_bool[i].select(diff_bool[i].bits[61],
+        diff_bool[i] = diff_bool[i].select(diff_bool[i][61],
                                            diff_bool[i] + int_boo_pr);
       }
       if (party == ALICE)
@@ -198,7 +199,7 @@ public:
     }
   }
 
-  SignedInt arith2bool(__uint128_t in) {
+  ZKInt arith2bool(__uint128_t in) {
     uint32_t edab_fp, edab_f2;
     __uint128_t sum_fp;
     uint64_t sum;
@@ -210,12 +211,12 @@ public:
     else
       auth_helper->open_check_recv(&sum, &sum_fp, 1);
 
-    SignedInt sum_boo = SignedInt(62, sum, PUBLIC);
+    ZKInt sum_boo = zk.input_int(62, sum, PUBLIC);
     sum_boo = sum_boo - bool_candidate[edab_f2];
-    return sum_boo.select(sum_boo.bits[61], sum_boo + int_boo_pr);
+    return sum_boo.select(sum_boo[61], sum_boo + int_boo_pr);
   }
 
-  void arith2bool(SignedInt *out, const __uint128_t *in, int64_t len) {
+  void arith2bool(ZKInt *out, const __uint128_t *in, int64_t len) {
     int64_t off = 0;
     while (off < len) {
       int64_t avail = (edabit_num > 0) ? (int64_t)edabit_num : (int64_t)N;
@@ -235,10 +236,10 @@ public:
         auth_helper->open_check_recv(sum.data(), sum_fp.data(), num);
       io->flush();
       for (int64_t i = 0; i < num; ++i) {
-        SignedInt sum_boo = SignedInt(62, sum[i], PUBLIC);
+        ZKInt sum_boo = zk.input_int(62, sum[i], PUBLIC);
         sum_boo = sum_boo - bool_candidate[edab_f2[i]];
         out[off + i] =
-            sum_boo.select(sum_boo.bits[61], sum_boo + int_boo_pr);
+            sum_boo.select(sum_boo[61], sum_boo + int_boo_pr);
       }
       off += num;
     }
@@ -319,7 +320,7 @@ public:
     }
   }
 
-  bool sender_check_conversion(SignedInt in2, __uint128_t inp) {
+  bool sender_check_conversion(ZKInt in2, __uint128_t inp) {
     if (party == ALICE) {
       uint64_t a = sender_check_int_value(in2);
       assert(a < PR);
@@ -332,11 +333,11 @@ public:
     return true;
   }
 
-  uint64_t sender_check_int_value(SignedInt in) {
+  uint64_t sender_check_int_value(ZKInt in) {
     std::bitset<64> val = 0;
-    int bit_len = in.size();
+    int bit_len = in.width();
     for (int i = 0; i < bit_len; ++i)
-      val.set(i, getLSB(in.bits[i].bit));
+      val.set(i, getLSB(in[i].w.label));
     return val.to_ullong();
   }
 

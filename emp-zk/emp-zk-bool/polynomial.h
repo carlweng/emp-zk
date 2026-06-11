@@ -5,10 +5,13 @@
 #include "emp-tool/emp-tool.h"
 
 namespace emp {
-using block_types::Bit;
-using block_types::SignedInt;
 using namespace std;
 
+// PolyProof operates purely on raw authenticated `block`s, so it sits at engine
+// level (below the typed ZKBit/ZKInt layer in the include order). The one method
+// that consumed typed values, zkp_inner_prdt_multi, now lives as a free function
+// in emp-zk-bool.h (after the typed layer is defined) and drives this class's
+// public accumulate_* / buffer / num members.
 class PolyProof {
 public:
   static constexpr int64_t buffer_sz = 1 << 20;
@@ -204,28 +207,7 @@ public:
     num++;
   }
 
-  inline void zkp_inner_prdt_multi(SignedInt *polyx, SignedInt *polyy, Bit *r,
-                                   Bit *s, int64_t len, int64_t in_width) {
-    for (int64_t width = 0; width < in_width; ++width) {
-      if (num >= buffer_sz)
-        batch_check();
-      if (party == ALICE) {
-        block A0 = zero_block, A1 = zero_block;
-        for (int64_t i = 0; i < len; ++i)
-          accumulate_alice(polyx[i][width].bit, polyy[0][i].bit, A0, A1);
-        accumulate_alice(r[width].bit, s->bit, A0, A1);
-        buffer[num] = A0;
-        buffer1[num] = A1;
-      } else {
-        block B = zero_block;
-        for (int64_t i = 0; i < len; ++i)
-          accumulate_bob(polyx[i][width].bit, polyy[0][i].bit, B);
-        accumulate_bob(r[width].bit, s->bit, B);
-        buffer[num] = B;
-      }
-      num++;
-    }
-  }
+  // (zkp_inner_prdt_multi moved to emp-zk-bool.h — see class comment above.)
 };
 
 } // namespace emp

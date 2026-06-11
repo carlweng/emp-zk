@@ -11,24 +11,26 @@ const int threads = 1;
 void test_circuit_zk(BoolIO *ios[threads], int party, int input_sz_lg) {
 
   long long input_sz = 1 << input_sz_lg;
-  setup_zk_bool(ios[0], party);
+  ZKBoolSession sess(ios[0], party);
   auto start = clock_start();
-  SignedInt a(32, 2, ALICE);
-  SignedInt b(32, 3, ALICE);
-  SignedInt c(32, 0, PUBLIC);
+  ZKInt a = sess.input_int(32, 2, ALICE);
+  ZKInt b = sess.input_int(32, 3, ALICE);
+  ZKInt c = sess.input_int(32, 0, PUBLIC);
+  // Int_T::operator[] returns a Bit by value (not a writable ref like the old
+  // SignedInt), so mutate individual bits through the public wire storage .w[].
   for (int i = 0; i < input_sz; ++i) {
     b = b + a;
     for (int j = 0; j < 32; ++j) {
-      a[j] = a[j] & b[j];
-      a[(j + 3) % 32] = a[(j + 2) % 32] | b[j];
+      a.w[j] = (a[j] & b[j]).w;
+      a.w[(j + 3) % 32] = (a[(j + 2) % 32] | b[j]).w;
     }
     for (int j = 0; j < 5; ++j)
-      b[j + 2] = a[j + 4] & b[j + 10];
+      b.w[j + 2] = (a[j + 4] & b[j + 10]).w;
     c = a ^ b;
   }
-  Bit ret = Bit(false, PUBLIC);
-  bool ret_b = ret.reveal<bool>(PUBLIC);
-  finalize_zk_bool();
+  ZKBit ret = ZKBit::constant(sess.direct_ctx(), false);
+  bool ret_b = sess.reveal(ret, PUBLIC).value_or(false);
+  sess.finalize();
   cout << 100 * input_sz << "\t" << time_from(start) << " " << party << endl;
   cout << ret_b << std::endl;
 }

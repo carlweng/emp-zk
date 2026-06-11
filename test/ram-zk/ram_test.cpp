@@ -18,17 +18,17 @@ int index_sz = 5, val_sz = 130;
 // check(). `bad` makes a malicious prover forge a stored value so the verifier
 // must abort.
 void test(BoolIO *ios[threads], int party, bool bad) {
-  setup_zk_bool(ios[0], party);
+  ZKBoolSession sess(ios[0], party);
   int cells = (1 << index_sz);
 
   int rounds = 4;
   int64_t T = (int64_t)rounds * cells * 2;   // each sweep: 1 write + 1 read / cell
 
-  vector<SignedInt> data;
+  vector<ZKInt> data;
   for (int i = 0; i < cells; ++i)
-    data.push_back(SignedInt(val_sz, i, ALICE));
+    data.push_back(sess.input_int(val_sz, i, ALICE));
 
-  ZKRam *ram = new ZKRam(party, index_sz, val_sz, T);
+  ZKRam *ram = new ZKRam(sess, index_sz, val_sz, T);
   ram->init(data);
 
   if (bad && party == ALICE)
@@ -43,17 +43,18 @@ void test(BoolIO *ios[threads], int party, bool bad) {
   for (int r = 0; r < rounds; ++r)
     for (int i = 0; i < cells; ++i) {
       expect[i] += cells;
-      ram->write(SignedInt(index_sz, i, PUBLIC), SignedInt(val_sz, expect[i], ALICE));
-      SignedInt got = ram->read(SignedInt(index_sz, i, PUBLIC));
-      Bit eq = got == SignedInt(val_sz, expect[i], ALICE);
-      if (!eq.reveal<bool>(PUBLIC))
+      ram->write(sess.input_int(index_sz, i, PUBLIC),
+                 sess.input_int(val_sz, expect[i], ALICE));
+      ZKInt got = ram->read(sess.input_int(index_sz, i, PUBLIC));
+      ZKBit eq = got == sess.input_int(val_sz, expect[i], ALICE);
+      if (!sess.reveal(eq, PUBLIC).value_or(false))
         wrong++;
     }
   ram->check();   // both shuffles; aborts on a forged value
   double t = time_from(start);
 
   delete ram;
-  finalize_zk_bool();
+  sess.finalize();
   int accesses = rounds * cells * 2;
   cout << "RAM ok (cells=" << cells << ", accesses=" << accesses
        << ", wrong=" << wrong << ")  " << t / accesses << " us/access  party "

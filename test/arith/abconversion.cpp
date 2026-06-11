@@ -14,28 +14,28 @@ void test_mix_circuit(BoolIO *ios[threads], int party, int sz) {
   for (int i = 0; i < sz; ++i)
     a[i] = rand() % PR;
 
-  setup_zk_bool(ios[0], party);
-  setup_zk_arith(ios[0], party, true);
+  ZKBoolSession sess(ios[0], party);
+  setup_zk_arith(ios[0], party, sess);
 
   IntFp *x = new IntFp[sz];
   batch_feed(x, a, sz);
 
-  sync_zk_bool();
+  sess.flush();
 
-  SignedInt *y = new SignedInt[sz];
+  ZKInt *y = new ZKInt[sz];
   for (int i = 0; i < sz; ++i)
-    y[i] = SignedInt(62, a[i], ALICE);
+    y[i] = sess.input_int(62, a[i], ALICE);
 
-  SignedInt PR_bl = SignedInt(62, PR, PUBLIC);
+  ZKInt PR_bl = sess.input_int(62, PR, PUBLIC);
 
-  sync_zk_bool();
+  sess.flush();
 
   auto start = clock_start();
   for (int k = 0; k < 2; ++k) {
     for (int i = 0; i < 3; ++i) {
       for (int j = i; j < sz - 3; j += 3) {
         y[j + 2] = y[j + 1] + y[j];
-        y[j + 2] = y[j + 2].select(y[j + 2].bits[61], y[j + 2] - PR_bl);
+        y[j + 2] = y[j + 2].select(y[j + 2][61], y[j + 2] - PR_bl);
 
         a[j + 2] = a[j + 1] + a[j];
         if (a[j + 2] > PR)
@@ -55,8 +55,8 @@ void test_mix_circuit(BoolIO *ios[threads], int party, int sz) {
 
   int incorrect_cnt = 0;
   for (int i = 0; i < sz; ++i) {
-    Bit ret = y[i].equal(SignedInt(62, a[i], PUBLIC));
-    if (ret.reveal<bool>(PUBLIC) != 1)
+    ZKBit ret = (y[i] == sess.input_int(62, a[i], PUBLIC));
+    if (sess.reveal(ret, PUBLIC).value_or(false) != 1)
       incorrect_cnt++;
   }
   if (incorrect_cnt)
@@ -66,7 +66,7 @@ void test_mix_circuit(BoolIO *ios[threads], int party, int sz) {
   batch_reveal_check(x, a, sz);
   std::cout << "end check arithmetic" << std::endl;
 
-  finalize_zk_bool();
+  sess.finalize();
   finalize_zk_arith();
 
   double tt = time_from(start);

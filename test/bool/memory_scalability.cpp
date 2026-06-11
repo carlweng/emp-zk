@@ -1,181 +1,85 @@
+// ZK memory / throughput scalability: replay the sha256_256 builtin K times over
+// the ZK boolean context, reusing one ProgramWorkspace, and report time + peak
+// RSS. The point is that peak memory stays bounded as the proven circuit grows —
+// replay streams gates through the session rather than materializing the whole
+// circuit. C++20.
+
 #include "../test_io_helpers.h"
 #include "emp-tool/emp-tool.h"
+#include "emp-tool/ir/context/clear.h"
+#include "emp-tool/ir/builtins.h"
+#include "emp-tool/ir/execute.h"
 #include <emp-zk/emp-zk.h>
-#include <iostream>
-#if defined(__linux__)
-#include <sys/time.h>
+#include <cstdio>
+#include <memory>
+#include <span>
+#include <vector>
+#if defined(__linux__) || defined(__APPLE__)
 #include <sys/resource.h>
-#elif defined(__APPLE__)
-#include <unistd.h>
-#include <sys/resource.h>
-#include <mach/mach.h>
 #endif
 
 using namespace emp;
-using namespace std;
 
 int port, party;
 const int threads = 1;
-const string circuit_file_location =
-    macro_xstr(EMP_CIRCUIT_PATH) + string("bristol_format/");
 
-void merkle_tree(Bit *dig, int node_index, int current_level, int depth,
-                 bool *witness, BristolFormat *cf) {
-  Bit msg[768];
-  if (current_level < (depth - 1)) {
-    merkle_tree(msg, 2 * node_index, current_level + 1, depth, witness, cf);
-    merkle_tree(msg + 256, 2 * node_index + 1, current_level + 1, depth,
-                witness, cf);
-    for (int i = 512; i < 768; ++i)
-      msg[i] = Bit(true, PUBLIC);
-  } else if ((current_level + 1) == depth) {
-    for (int i = 0; i < 512; ++i)
-      msg[i] = Bit(witness + node_index * 512 + i, ALICE);
-  }
-  cf->compute(dig, msg, (const Bit *)nullptr);
-}
-
-void test_merkle_tree_dfs(BoolIO *ios[threads], int party, int depth) {
-  std::cout << "merkle tree of depth: " << depth << std::endl;
-  string file = circuit_file_location + "sha-256.txt";
-  BristolFormat cf(file.c_str());
-
-  int width = 1 << (depth - 1);
-  std::cout << "number of nodes: " << (2 * width - 1) << std::endl;
-
-  auto start = clock_start();
-  setup_zk_bool(ios[0], party);
-
-  bool *witness = new bool[width];
-  PRG prg;
-  prg.random_bool(witness, width);
-  Bit dig_cipher_bit[512];
-
-  merkle_tree(dig_cipher_bit, 0, 0, depth, witness, &cf);
-  Bit res = Bit(true, PUBLIC);
-  bool ret = res.reveal<bool>(PUBLIC);
-  finalize_zk_bool();
-  std::cout << depth << " " << time_from(start) << " us " << party << " " << ret
-            << "\n";
-
-  delete[] witness;
-
-#if defined(__linux__)
-  struct rusage rusage;
-  if (!getrusage(RUSAGE_SELF, &rusage))
-    std::cout << "[Linux]Peak resident set size: " << (size_t)rusage.ru_maxrss
-              << std::endl;
-  else
-    std::cout << "[Linux]Query RSS failed" << std::endl;
-#elif defined(__APPLE__)
-  struct mach_task_basic_info info;
-  mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
-  if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info,
-                &count) == KERN_SUCCESS)
-    std::cout << "[Mac]Peak resident set size: "
-              << (size_t)info.resident_size_max << std::endl;
-  else
-    std::cout << "[Mac]Query RSS failed" << std::endl;
+static long peak_rss_kib() {
+#if defined(__linux__) || defined(__APPLE__)
+  struct rusage ru;
+  getrusage(RUSAGE_SELF, &ru);
+#if defined(__APPLE__)
+  return ru.ru_maxrss / 1024;   // macOS reports bytes
+#else
+  return ru.ru_maxrss;          // Linux reports KiB
 #endif
-}
-
-void test_merkle_tree(BoolIO *ios[threads], int party, int depth) {
-  std::cout << "merkle tree of depth: " << depth << std::endl;
-  string file = circuit_file_location + "sha-256.txt";
-  int input_n, output_n;
-  BristolFormat cf(file.c_str());
-  input_n = cf.n1;
-  output_n = cf.n3;
-
-  int width = 1 << (depth - 1);
-  std::cout << "number of nodes: " << (2 * width - 1) << std::endl;
-
-  auto start = clock_start();
-  setup_zk_bool(ios[0], party);
-
-  Bit *msg_cipher_bit = new Bit[input_n];
-  Bit *dig_cipher_bit = new Bit[output_n * (2 * width - 1)];
-
-  for (int i = 0; i < input_n; ++i)
-    msg_cipher_bit[i] = Bit(true, ALICE);
-
-  // leaves
-  Bit *cipher_ptr = dig_cipher_bit;
-  Bit *plain_ptr = cipher_ptr;
-  for (int i = 0; i < width; ++i) {
-    cf.compute(cipher_ptr, msg_cipher_bit, (const Bit *)nullptr);
-
-    for (int j = 0; j < output_n; ++j)
-      msg_cipher_bit[j] = cipher_ptr[j];
-
-    cipher_ptr += output_n;
-  }
-  width = width >> 1;
-
-  // inner nodes
-  for (int j = 0; j < depth - 1; ++j) {
-    for (int i = 0; i < width; ++i) {
-      cf.compute(cipher_ptr, plain_ptr, (const Bit *)nullptr);
-      cipher_ptr += output_n;
-      plain_ptr += output_n * 2;
-    }
-    width = width >> 1;
-  }
-
-  Bit res = Bit(false, PUBLIC);
-  bool ret = res.reveal<bool>(PUBLIC);
-  finalize_zk_bool();
-  std::cout << depth << " " << time_from(start) << " ms " << party << " " << ret
-            << "\n";
-
-  delete[] msg_cipher_bit;
-  delete[] dig_cipher_bit;
-
-#if defined(__linux__)
-  struct rusage rusage;
-  if (!getrusage(RUSAGE_SELF, &rusage))
-    std::cout << "[Linux]Peak resident set size: " << (size_t)rusage.ru_maxrss
-              << std::endl;
-  else
-    std::cout << "[Linux]Query RSS failed" << std::endl;
-#elif defined(__APPLE__)
-  struct mach_task_basic_info info;
-  mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
-  if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info,
-                &count) == KERN_SUCCESS)
-    std::cout << "[Mac]Peak resident set size: "
-              << (size_t)info.resident_size_max << std::endl;
-  else
-    std::cout << "[Mac]Query RSS failed" << std::endl;
+#else
+  return 0;
 #endif
 }
 
 int main(int argc, char **argv) {
   parse_party_and_port(argv, &party, &port);
+  int K = (argc >= 4) ? atoi(argv[3]) : 8;   // number of replays
+
   BoolIO *ios[threads];
   make_bool_ios(ios, party, port);
 
-  std::cout << std::endl
-            << "------------ circuit zero-knowledge proof test ------------"
-            << std::endl
-            << std::endl;
-  ;
+  ZKBoolSession sess(ios[0], party);
+  ZKBoolContext &ctx = sess.direct_ctx();
+  const circuit::BooleanProgram &prog = circuit::builtin_circuit("sha256_256");
+  const int nin = (int)prog.num_inputs;
 
-  int depth = 0;
-  if (argc < 3) {
-    std::cout
-        << "usage: bin/bool/memory_scalability PARTY PORT DEPTH_OF_MERKLE_TREE"
-        << std::endl;
-    return -1;
-  } else if (argc == 3) {
-    depth = 4;
-  } else {
-    depth = atoi(argv[3]);
+  std::vector<uint8_t> wit((size_t)nin);
+  for (int i = 0; i < nin; ++i)
+    wit[(size_t)i] = (uint8_t)(((uint32_t)i * 0x85ebca6bu) >> 13) & 1u;
+
+  ClearCtx cctx;
+  auto cout = execute_program(cctx, prog,
+                              std::span<const uint8_t>(wit.data(), (size_t)nin));
+
+  auto inbits = std::make_unique<bool[]>((size_t)nin);
+  for (int i = 0; i < nin; ++i) inbits[(size_t)i] = wit[(size_t)i] != 0;
+
+  ProgramWorkspace<ZKWire> ws;   // reused across replays -> bounded memory
+  auto start = clock_start();
+  int wrong = 0;
+  for (int k = 0; k < K; ++k) {
+    std::vector<ZKWire> zin = sess.input_bits(ALICE, inbits.get(), (size_t)nin);
+    const auto &zout = execute_program(ctx, prog,
+                          std::span<const ZKWire>(zin.data(), zin.size()), ws);
+
+    auto dig = std::make_unique<bool[]>(zout.size());
+    sess.reveal_bits(dig.get(), PUBLIC, zout.data(), zout.size());
+    for (size_t i = 0; i < cout.size(); ++i)
+      if ((dig[i] ? 1 : 0) != (cout[i] & 1)) { ++wrong; break; }
   }
+  double t = time_from(start);
+  sess.finalize();
 
-  test_merkle_tree_dfs(ios, party, depth);
-  // test_merkle_tree(ios, party, depth);
+  if (party == ALICE)
+    printf("ZK sha256_256 x%d replays: %.1f ms, %.2f ms/replay, peakRSS %ld MiB, "
+           "wrong=%d\n", K, t / 1000.0, t / 1000.0 / K, peak_rss_kib() / 1024, wrong);
 
   destroy_bool_ios(ios);
-  return 0;
+  return wrong ? 1 : 0;
 }

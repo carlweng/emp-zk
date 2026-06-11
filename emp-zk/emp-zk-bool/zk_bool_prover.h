@@ -34,36 +34,38 @@ public:
     io->flush();
   }
 
-  // ---- Backend virtuals --------------------------------------------------
+  // ---- Engine gate / I-O surface (prover) --------------------------------
 
-  void not_gate(void *o, const void *in) override {
+  block not_block(block in) override {
     // Canonical XOR-with-1: flips the cleartext LSB; the MAC is unchanged.
-    *static_cast<block *>(o) =
-        *static_cast<const block *>(in) ^ makeBlock(0, 1);
+    return in ^ makeBlock(0, 1);
   }
 
-  void and_gate(void *o, const void *l, const void *r) override {
+  block and_block(block l, block r) override {
     ++gid;
-    *static_cast<block *>(o) = auth_compute_and(
-        *static_cast<const block *>(l), *static_cast<const block *>(r));
+    return auth_compute_and(l, r);
   }
 
-  void feed(void *out, int from_party, const bool *in, size_t n) override {
-    block *label = static_cast<block *>(out);
+  void feed_bits(block *out, int from_party, const bool *in, size_t n) override {
+    // Guard the raw primitive too (engine() is public): an invalid owner would
+    // leave the verifier on the other branch and desync the transcript.
     if (from_party == ALICE)
-      authenticated_bits_input(label, in, static_cast<int64_t>(n));
+      authenticated_bits_input(out, in, static_cast<int64_t>(n));
     else if (from_party == PUBLIC)
-      for (size_t i = 0; i < n; ++i) label[i] = pub_label[in[i]];
+      for (size_t i = 0; i < n; ++i) out[i] = pub_label[in[i]];
+    else
+      error("ZKBoolProver::feed_bits: input owner must be ALICE or PUBLIC");
   }
 
-  void reveal(bool *out, int to_party, const void *in, size_t n) override {
-    const block *label = static_cast<const block *>(in);
+  void reveal_bits(bool *out, int to_party, const block *in, size_t n) override {
+    if (to_party != ALICE && to_party != BOB && to_party != PUBLIC)
+      error("ZKBoolProver::reveal_bits: recipient must be ALICE, BOB, or PUBLIC");
     int64_t len = static_cast<int64_t>(n);
     if (to_party == ALICE) {
       // Local read-out — no MAC check needed since prover is the trust root.
-      for (int64_t i = 0; i < len; ++i) out[i] = getLSB(label[i]);
+      for (int64_t i = 0; i < len; ++i) out[i] = getLSB(in[i]);
     } else { // BOB or PUBLIC
-      verify_output(out, label, len);
+      verify_output(out, in, len);
     }
   }
 
@@ -271,10 +273,6 @@ private:
 
  public:
 };
-
-inline ZKBoolProver *get_bool_backend_prv() {
-  return static_cast<ZKBoolProver *>(backend);
-}
 
 } // namespace emp
 #endif

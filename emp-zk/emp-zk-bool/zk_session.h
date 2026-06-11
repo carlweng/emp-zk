@@ -31,9 +31,8 @@
 //   input aborts. reveal recipient must be ALICE/BOB/PUBLIC.
 
 #include "emp-zk/emp-zk-bool/zk_types.h"          // ZKBit/ZKInt + ZKBoolContext + engine
-#include "emp-tool/ir/session/session_io.h"        // Session/DirectSession/SessionIO
+#include "emp-tool/ir/session/session_io.h"        // Session/DirectSession/SessionIO/encode_value_bits
 #include "emp-tool/ir/wire_value.h"                // WireValue
-#include "emp-tool/circuits/value_traits.h"        // value_traits<V>: width/encode/decode
 #include <memory>
 #include <optional>
 #include <vector>
@@ -96,12 +95,8 @@ public:
     V input(int owner, const typename V::clear_t& clear) {
         static_assert(std::same_as<typename V::context_type, DirectCtx>,
                       "ZKBoolSession::input<V>: V must be a value over ZKBoolContext");
-        const int W = value_traits<V>::width();
-        std::vector<bool> e = value_traits<V>::encode(clear);
-        // Always-on codec-width guard: a mis-sized encode would silently corrupt
-        // the input bits (never pad).
-        if (e.size() != (size_t)W)
-            error("ZKBoolSession::input: V::encode width != V::width()");
+        const int W = V::width();
+        std::vector<bool> e = encode_value_bits<V>(clear, "ZKBoolSession::input");
         auto bb = std::make_unique<bool[]>((size_t)W);     // real bool[], not a casted byte buffer
         for (int i = 0; i < W; ++i) bb[(size_t)i] = (bool)e[(size_t)i];
         std::vector<ZKWire> w = input_bits(owner, bb.get(), (size_t)W);
@@ -117,13 +112,13 @@ public:
             error("ZKBoolSession::reveal: value is bound to a different context");
 #endif
         check_recipient_(recipient);
-        const int W = value_traits<V>::width();
+        const int W = V::width();
         std::vector<ZKWire> w((size_t)W);
         v.pack_wires(w.data());
         auto bb = std::make_unique<bool[]>((size_t)W);
         reveal_bits(bb.get(), recipient, w.data(), (size_t)W);
         if (!has_value_(recipient)) return std::nullopt;
-        return std::optional<typename V::clear_t>(value_traits<V>::decode(bb.get()));
+        return std::optional<typename V::clear_t>(V::decode(bb.get()));
     }
 
     // ---- runtime-width int I/O (replaces SignedInt(w,v,party) / .reveal<T>) ----

@@ -9,8 +9,8 @@ int port, party;
 const int threads = 1;
 // val_sz is wide on purpose: index_sz + val_sz + time_sz > 128 forces each
 // record to span two f2k wires, exercising ZKPermProof's multi-block compress
-// path (the capability that subsumes the old multi-block ZKRamExt). Values
-// themselves stay < 2^16. Single-block records are covered by rom_test/set_test.
+// path. Values themselves stay < 2^16. Single-block records are covered by
+// rom_test/set_test.
 int index_sz = 5, val_sz = 130;
 
 // Two-shuffles read/write RAM (unified ZKRam, read/write mode): init, an

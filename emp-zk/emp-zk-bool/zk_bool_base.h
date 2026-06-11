@@ -17,10 +17,10 @@
 //                          hooks) and the gate/I-O overrides routing to them.
 //   - zk_bool_verifier.h — symmetric for the verifier.
 //
-// What used to be a separate OSTriple class is folded directly into the engine
-// hierarchy: state goes on the base, prover-specific methods go in ZKBoolProver,
-// verifier-specific in ZKBoolVerifier. Removes the runtime party dispatch
-// (`if (party == ALICE) … else …`) scattered through every method.
+// The triple-generation state and methods live directly on the engine
+// hierarchy: shared state on the base, prover-specific methods in ZKBoolProver,
+// verifier-specific in ZKBoolVerifier — the party split is by subclass, so no
+// method carries runtime party dispatch (`if (party == ALICE) … else …`).
 
 #include <emp-tool/emp-tool.h>
 #include "emp-ot/emp-ot.h"
@@ -162,7 +162,7 @@ public:
     return b ^ (delta & makeBlock(m, m));
   }
 
-  // ---- Gate surface (replaces the old emp-tool Backend vtable) --------
+  // ---- Gate surface (what ZKBoolContext's gate ops route to) ----------
   // Shared, non-virtual: public constants and XOR are party-agnostic.
   block public_block(bool b) const { return pub_label[b]; }
   block xor_block(block l, block r) const { return l ^ r; }

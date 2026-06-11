@@ -15,8 +15,8 @@ using namespace std;
 
 // --- polynomial-proof entry points -----------------------------------------
 // Statement bits/ints are ZKBit/ZKInt; the proof gadget (PolyProof) runs on raw
-// authenticated blocks, so these copy the wires out at the boundary (the old
-// (block*)Bit* cast is no longer valid — a ZKBit also carries a context ptr).
+// authenticated blocks, so these copy the wires out at the boundary (a ZKBit
+// carries a context pointer alongside its wire — not layout-castable to block*).
 
 inline void zkp_poly_deg2(ZKBoolSession &sess, ZKBit *x, ZKBit *y, bool *coeff,
                           int64_t len) {

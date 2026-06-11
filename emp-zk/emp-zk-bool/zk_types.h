@@ -7,10 +7,10 @@
 // surface) expresses statements with these, while the proof gadgets
 // (polynomial / perm / f2k) keep operating on raw authenticated blocks.
 //
-// ZKInt is runtime-width (Int_T<Ctx,0>), matching the old block_types::SignedInt:
-// width is a runtime value and it is intentionally NOT a fixed-width WireValue
-// (no static width()/clear codec). Build/open it through ZKBoolSession's
-// input_int / reveal_int, NOT Int_T::constant (which sign-extends above bit 63).
+// ZKInt is runtime-width (Int_T<Ctx,0>): width is a runtime value and it is
+// intentionally NOT a fixed-width WireValue (no static width()/clear codec).
+// Build/open it through ZKBoolSession's input_int / reveal_int, NOT
+// Int_T::constant (which sign-extends above bit 63).
 //
 // Boundary helpers COPY the block out of / into a value (a ZKWire is layout-
 // identical to a block — asserted in zk_context.h — but a reinterpret_cast view

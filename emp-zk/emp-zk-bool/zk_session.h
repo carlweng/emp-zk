@@ -13,6 +13,12 @@
 // aborts via error() on a cheating prover) by destroying the engine. finalize()
 // is explicit for a clear failure surface; the dtor calls it if you did not.
 //
+// Settlement (session contract, ir/session/session.h): this session settles AT
+// FINALIZE — a value returned by reveal is PROVISIONAL until finalize() has run
+// the closing checks; only then is the proof (and every earlier reveal) sound
+// against a cheating prover. Do not act on revealed values across a trust
+// boundary before finalize() succeeds.
+//
 // I/O surface (mirrors emp-sh2pc's session):
 //   * input<V>/reveal<V> — generic over a fixed-width emp-tool WireValue V.
 //   * input_int/reveal_int — runtime-width ZKInt, the replacement for the old

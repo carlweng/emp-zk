@@ -106,9 +106,8 @@ All values are "million gates per second".
 |2|1.4|5.6|8.7|10.2|10.4|
 |3|1.4|5.9|9.3|11.7|12.5|
 
-(Numbers measured on the v0.3.x line. The `main` migration is
-behaviorally a port — re-measured numbers should be in the same
-ballpark.)
+(Numbers measured on the v0.3.x line; `main` runs the same protocols,
+so re-measured numbers should be in the same ballpark.)
 
 ## [Acknowledgement, Reference, and Questions](https://github.com/emp-toolkit/emp-readme/blob/main/README.md#citation)
 

@@ -29,7 +29,7 @@ inline void setup_zk_arith(BoolIO *io, int party) {
 
 // Setup with bool<->arith conversion. `bool_sess` is the live ZKBoolSession the
 // conversion shares (its engine / Δ); the caller keeps it alive until after
-// finalize_zk_arith(). Replaces the old `enable_conversion` flag + global backend.
+// finalize_zk_arith().
 inline void setup_zk_arith(BoolIO *io, int party, ZKBoolSession &bool_sess) {
   setup_zk_arith(io, party);
   if (party == ALICE) {

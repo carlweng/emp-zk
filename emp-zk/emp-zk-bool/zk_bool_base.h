@@ -85,7 +85,7 @@ public:
   GaloisFieldPacking pack;
   BoolIO  *io  = nullptr;
   PRG prg;
-  Ferret  *ferret    = nullptr;
+  SilentFerret *ferret = nullptr;
   PolyProof  *polyproof = nullptr;
 
   // Output-MAC accumulator. Hash + scratch buffer; finalize at teardown.
@@ -94,30 +94,34 @@ public:
 
   // ---- Lifecycle ------------------------------------------------------
 
-  ZKBoolBase(int p, BoolIO *io_) : party(p), io(io_) {
+  // `expected_cots` sizes the SilentFerret prepay: pass the number of COTs the
+  // proof will draw (≈ AND gates + authenticated inputs + check overhead) and
+  // begin() ships ALL correction traffic + malicious checks up front, so the
+  // whole proof's COT consumption is wire-free. 0 (the default) uses the
+  // per-round streaming begin() — safe for an unknown circuit size, at the cost
+  // of one COT-correction burst per ~15M-COT round.
+  ZKBoolBase(int p, BoolIO *io_, int64_t expected_cots = 0)
+      : party(p), io(io_) {
     // BoolIO inherits IOChannel publicly with the IOChannel subobject at
     // offset 0, so the cast is a no-op at runtime. Ferret now takes a
     // single IOChannel (post-unification with the other OT extensions).
     IOChannel *iochan = reinterpret_cast<IOChannel *>(io_);
-    ferret = new Ferret(3 - p, iochan, /*malicious=*/true);
+    ferret = new SilentFerret(3 - p, iochan, /*malicious=*/true);
     delta = ferret->Delta;           // Δ sampled in Ferret's ctor
-    // Open one persistent Ferret streaming session for the whole proof;
-    // all COTs are drawn via ferret->next_n(). This amortizes Ferret's
-    // per-round end-work over the entire proof instead of paying it per
-    // chunk (as repeated one-shot rcot() did). Closed in the destructor.
-    ferret->begin();
+    // One persistent SilentFerret streaming session for the whole proof. COTs
+    // are drawn lazily, one per AND gate, straight from the streaming interface
+    // (its leftover buffer); no separate pre-drawn COT pool is kept. Closed in
+    // the destructor.
+    if (expected_cots > 0) ferret->begin(expected_cots);
+    else                   ferret->begin();
 
+    // Buffers for the QuickSilver AND-gate batch check (left/right inputs +
+    // output MAC, folded once per CHECK_SZ gates with an FS-derived chi). The
+    // out buffer holds only the per-gate output MAC now — the fresh COT comes
+    // from ferret->next_n() at gate time, not a pre-draw.
     andgate_out_buffer.resize(CHECK_SZ);
     andgate_left_buffer.resize(CHECK_SZ);
     andgate_right_buffer.resize(CHECK_SZ);
-
-    // Pre-draw the first batch of COTs into andgate_out_buffer. Each AND
-    // gate consumes one slot (reads the fresh COT, then overwrites the slot
-    // with the gate's output MAC for the eventual batch check), and the
-    // batch boundary in auth_compute_and reloads the whole buffer after each
-    // check. Drawing a full CHECK_SZ batch at once keeps the COT recv as one
-    // burst, decoupled from the per-gate bit traffic flowing the other way.
-    ferret->next_n(andgate_out_buffer.data(), CHECK_SZ);
 
     // Public-input label table — known to both parties by design.
     // PRP(1) key, distinct from ZKFpExec's PRP(0), so the two public

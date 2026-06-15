@@ -10,7 +10,8 @@ using namespace std;
 
 class ZKBoolProver : public ZKBoolBase {
 public:
-  ZKBoolProver(BoolIO *io) : ZKBoolBase(ALICE, io) {
+  ZKBoolProver(BoolIO *io, int64_t expected_cots = 0)
+      : ZKBoolBase(ALICE, io, expected_cots) {
     // PUBLIC label for bit 1 has its LSB set so getLSB() reads back the
     // cleartext value. (Verifier instead xors zdelta into pub_label[1].)
     pub_label[1] = pub_label[1] ^ makeBlock(0, 1);
@@ -82,19 +83,18 @@ private:
   }
 
   // Authenticated AND: compute s = a·b on cleartext, mask the pre-drawn COT
-  // to hold s, send the masking bit. The fresh COT is read out of
-  // andgate_out_buffer (pre-filled in the ctor); the same slot is
-  // overwritten with the output MAC, buffering it alongside the inputs for
-  // the eventual batch correctness check. When the buffer fills, run the
-  // check then refill — so the COT recv is one burst per CHECK_SZ gates.
+  // to hold s, send the masking bit. The fresh COT is drawn one at a time from
+  // the SilentFerret streaming interface (wire-free); the gate's output MAC is
+  // buffered alongside the inputs for the eventual batch correctness check.
+  // When the buffer fills, run the check.
   block auth_compute_and(block a, block b) {
     if (check_cnt == CHECK_SZ) {
       andgate_correctness_check_manage();
       check_cnt = 0;
-      ferret->next_n(andgate_out_buffer.data(), CHECK_SZ);
     }
 
-    block auth = andgate_out_buffer[check_cnt];   // pre-drawn fresh COT
+    block auth;
+    ferret->next_n(&auth, 1);                     // fresh COT from the stream
     andgate_left_buffer[check_cnt]  = a;
     andgate_right_buffer[check_cnt] = b;
 
@@ -103,7 +103,7 @@ private:
     auth = with_lsb(auth, s);
     io->send_bit(d);
 
-    andgate_out_buffer[check_cnt] = auth;          // overwrite with output MAC
+    andgate_out_buffer[check_cnt] = auth;          // output MAC for the check
     check_cnt++;
     return auth;
   }

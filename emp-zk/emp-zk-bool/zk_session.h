@@ -31,8 +31,9 @@
 //   input aborts. reveal recipient must be ALICE/BOB/PUBLIC.
 
 #include "emp-zk/emp-zk-bool/zk_types.h"          // ZKBit/ZKInt + ZKBoolContext + engine
-#include "emp-tool/ir/session/session_io.h"        // Session/DirectSession/SessionIO/encode_value_bits
+#include "emp-tool/ir/session/session_io.h"        // Session/DirectSession/SessionIO
 #include "emp-tool/ir/wire_value.h"                // WireValue
+#include <array>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -45,12 +46,17 @@ public:
     template <class V> using reveal_t = std::optional<typename V::clear_t>;
 
     // party = ALICE (prover) or BOB (verifier). `io` is caller-owned.
-    ZKBoolSession(BoolIO* io, int party) {
+    // `expected_cots` (optional) sizes the SilentFerret prepay to the proof:
+    // pass roughly the number of COTs it will draw (~ AND gates + authenticated
+    // inputs + check overhead) and all COT correction traffic + malicious checks
+    // ship once at setup, leaving the whole proof's COT consumption wire-free.
+    // 0 (default) uses per-round streaming, safe for an unknown circuit size.
+    ZKBoolSession(BoolIO* io, int party, int64_t expected_cots = 0) {
         if (party != ALICE && party != BOB)
             error("ZKBoolSession: party must be ALICE or BOB");
         if (io == nullptr) error("ZKBoolSession: io channel must not be null");
-        if (party == ALICE) eng_ = new ZKBoolProver(io);
-        else                eng_ = new ZKBoolVerifier(io);
+        if (party == ALICE) eng_ = new ZKBoolProver(io, expected_cots);
+        else                eng_ = new ZKBoolVerifier(io, expected_cots);
         ctx_ = ZKBoolContext(eng_);
     }
     ~ZKBoolSession() { finalize(); }
@@ -95,11 +101,9 @@ public:
     V input(int owner, const typename V::clear_t& clear) {
         static_assert(std::same_as<typename V::context_type, DirectCtx>,
                       "ZKBoolSession::input<V>: V must be a value over ZKBoolContext");
-        const int W = V::width();
-        std::vector<bool> e = encode_value_bits<V>(clear, "ZKBoolSession::input");
-        auto bb = std::make_unique<bool[]>((size_t)W);     // real bool[], not a casted byte buffer
-        for (int i = 0; i < W; ++i) bb[(size_t)i] = (bool)e[(size_t)i];
-        std::vector<ZKWire> w = input_bits(owner, bb.get(), (size_t)W);
+        constexpr int W = V::width();
+        const std::array<bool, (std::size_t)W> bits = V::encode(clear);   // stack; width is the type
+        std::vector<ZKWire> w = input_bits(owner, bits.data(), (size_t)W);
         return V::from_wires(ctx_, w.data());
     }
 
@@ -112,13 +116,13 @@ public:
             error("ZKBoolSession::reveal: value is bound to a different context");
 #endif
         check_recipient_(recipient);
-        const int W = V::width();
-        std::vector<ZKWire> w((size_t)W);
+        constexpr int W = V::width();
+        std::array<ZKWire, (std::size_t)W> w{};
         v.pack_wires(w.data());
-        auto bb = std::make_unique<bool[]>((size_t)W);
-        reveal_bits(bb.get(), recipient, w.data(), (size_t)W);
+        std::array<bool, (std::size_t)W> bb{};
+        reveal_bits(bb.data(), recipient, w.data(), (size_t)W);
         if (!has_value_(recipient)) return std::nullopt;
-        return std::optional<typename V::clear_t>(V::decode(bb.get()));
+        return std::optional<typename V::clear_t>(V::decode(bb.data()));
     }
 
     // ---- runtime-width int I/O (replaces SignedInt(w,v,party) / .reveal<T>) ----

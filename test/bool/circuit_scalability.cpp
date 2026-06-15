@@ -11,7 +11,10 @@ const int threads = 1;
 void test_circuit_zk(BoolIO *ios[threads], int party, int input_sz_lg) {
 
   long long input_sz = 1 << input_sz_lg;
-  ZKBoolSession sess(ios[0], party);
+  // ~100 AND gates per iteration ⇒ ~100*input_sz COTs; size the SilentFerret
+  // prepay to that so all COT traffic + malicious checks ship once at setup and
+  // the whole proof's COT draws are wire-free (minimal round-trips).
+  ZKBoolSession sess(ios[0], party, 100LL * input_sz);
   auto start = clock_start();
   ZKInt a = sess.input_int(32, 2, ALICE);
   ZKInt b = sess.input_int(32, 3, ALICE);

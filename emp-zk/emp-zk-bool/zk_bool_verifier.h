@@ -15,7 +15,8 @@ public:
   // specific because NOT folds it on the wire.
   block zdelta;
 
-  ZKBoolVerifier(BoolIO *io) : ZKBoolBase(BOB, io) {
+  ZKBoolVerifier(BoolIO *io, int64_t expected_cots = 0)
+      : ZKBoolBase(BOB, io, expected_cots) {
     zdelta = delta ^ makeBlock(0, 1);
     // PUBLIC label for bit 1: xor zdelta in so the wire MAC is right
     // even though there's no cleartext flip.
@@ -83,27 +84,26 @@ private:
     }
   }
 
-  // Authenticated AND: receive the prover's masking bit, fold it into the
-  // pre-drawn COT key to reconstruct the wire key. The fresh COT is read
-  // out of andgate_out_buffer (pre-filled in the ctor); the same slot
-  // is overwritten with the wire key, buffering it alongside the inputs for
-  // the eventual batch check. When the buffer fills, run the check then
-  // refill — so the COT recv is one burst per CHECK_SZ gates.
+  // Authenticated AND: receive the prover's masking bit, fold it into the fresh
+  // COT key to reconstruct the wire key. The COT is drawn one at a time from the
+  // SilentFerret streaming interface (wire-free); the wire key is buffered
+  // alongside the inputs for the eventual batch check. When the buffer fills,
+  // run the check.
   block auth_compute_and(block a, block b) {
     if (check_cnt == CHECK_SZ) {
       andgate_correctness_check_manage();
       check_cnt = 0;
-      ferret->next_n(andgate_out_buffer.data(), CHECK_SZ);
     }
 
-    block auth = andgate_out_buffer[check_cnt];   // pre-drawn fresh COT key
+    block auth;
+    ferret->next_n(&auth, 1);                     // fresh COT from the stream
     andgate_left_buffer[check_cnt]  = a;
     andgate_right_buffer[check_cnt] = b;
 
     bool d = io->recv_bit();
     auth = clear_lsb(xor_delta_if(auth, d));
 
-    andgate_out_buffer[check_cnt] = auth;          // overwrite with wire key
+    andgate_out_buffer[check_cnt] = auth;          // wire key for the check
     check_cnt++;
     return auth;
   }

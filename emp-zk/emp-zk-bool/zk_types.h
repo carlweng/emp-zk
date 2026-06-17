@@ -7,10 +7,12 @@
 // surface) expresses statements with these, while the proof gadgets
 // (polynomial / perm / f2k) keep operating on raw authenticated blocks.
 //
-// ZKInt is runtime-width (Int_T<Ctx,0>): width is a runtime value and it is
-// intentionally NOT a fixed-width WireValue (no static width()/clear codec).
-// Build/open it through ZKBoolSession's input_int / reveal_int, NOT
-// Int_T::constant (which sign-extends above bit 63).
+// ZKInt / ZKUInt are runtime-width (Int_T/UInt_T<Ctx, runtime_width>): width is a
+// runtime value and they are intentionally NOT fixed-width WireValues (no static
+// width()/clear codec) — they model RuntimeWidthValue instead. Build/open through
+// ZKBoolSession's runtime overloads sess.input<ZKUInt>(owner, value, width) /
+// sess.reveal(x, recipient). ZKUInt reveals as uint64_t (zero-extend); ZKInt as
+// int64_t (two's-complement sign-extend) — pick by the value's signedness.
 //
 // Boundary helpers COPY the block out of / into a value (a ZKWire is layout-
 // identical to a block — asserted in zk_context.h — but a reinterpret_cast view
@@ -22,8 +24,9 @@
 
 namespace emp {
 
-using ZKBit = Bit_T<ZKBoolContext>;
-using ZKInt = Int_T<ZKBoolContext, 0>;   // runtime-width signed integer
+using ZKBit  = Bit_T<ZKBoolContext>;
+using ZKInt  = Int_T<ZKBoolContext, 0>;    // runtime-width signed integer (two's-complement)
+using ZKUInt = UInt_T<ZKBoolContext, 0>;   // runtime-width unsigned integer (zero-extend)
 
 // --- boundary helpers -------------------------------------------------------
 
@@ -31,7 +34,10 @@ using ZKInt = Int_T<ZKBoolContext, 0>;   // runtime-width signed integer
 inline block bit_block(const ZKBit& b) { return b.w.label; }
 
 // Copy the per-bit authenticated blocks (LSB-first) out of a runtime-width int.
-inline std::vector<block> int_blocks(const ZKInt& x) {
+// Generic over the runtime-width value type (ZKInt or ZKUInt) — it reads only the
+// wires, which are identical regardless of the value's signedness.
+template <class V>
+inline std::vector<block> int_blocks(const V& x) {
     const int n = x.width();
     std::vector<block> out((std::size_t)n);
     for (int i = 0; i < n; ++i) out[(std::size_t)i] = x.data()[i].label;

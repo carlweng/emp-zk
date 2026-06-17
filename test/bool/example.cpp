@@ -8,11 +8,13 @@ using namespace std;
 int port, party;
 const int threads = 1;
 
+using Int32 = Int_T<ZKBoolContext, 32>;   // signed, fixed width: a WireValue
+
 void test_circuit_zk(BoolIO *ios[threads], int party) {
   ZKBoolSession sess(ios[0], party);
-  ZKInt a = sess.input_int(32, 3, ALICE);
-  ZKInt b = sess.input_int(32, 2, ALICE);
-  cout << sess.reveal_int(a - b, PUBLIC).value_or(0) << endl;
+  Int32 a = sess.input<Int32>(ALICE, 3);
+  Int32 b = sess.input<Int32>(ALICE, 2);
+  cout << sess.reveal(a - b, PUBLIC).value_or(0) << endl;
 
   sess.finalize();
 }

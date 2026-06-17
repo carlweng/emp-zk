@@ -7,6 +7,7 @@ using namespace std;
 
 int port, party;
 const int threads = 1;
+using Int32 = Int_T<ZKBoolContext, 32>;   // signed, fixed width: a WireValue
 
 void test_circuit_zk(BoolIO *ios[threads], int party, int log_trial) {
 
@@ -14,9 +15,9 @@ void test_circuit_zk(BoolIO *ios[threads], int party, int log_trial) {
   if (input_sz < 100000000LL) {
     auto start = clock_start();
     ZKBoolSession sess(ios[0], party);
-    ZKInt *a = new ZKInt[input_sz / 32];
+    Int32 *a = new Int32[input_sz / 32];
     for (int i = 0; i < input_sz / 32; ++i)
-      a[i] = sess.input_int(32, i, ALICE);
+      a[i] = sess.input<Int32>(ALICE, i);
 
     sess.reveal(a[0][0], PUBLIC);
     sess.finalize();
@@ -28,11 +29,11 @@ void test_circuit_zk(BoolIO *ios[threads], int party, int log_trial) {
     auto start = clock_start();
     ZKBoolSession sess(ios[0], party);
     int round = input_sz / unit;
-    ZKInt **a = (ZKInt **)malloc(round * sizeof(ZKInt *));
+    Int32 **a = (Int32 **)malloc(round * sizeof(Int32 *));
     for (int i = 0; i < round; ++i) {
-      a[i] = new ZKInt[unit];
+      a[i] = new Int32[unit];
       for (int j = 0; j < unit / 32; ++j)
-        a[i][j] = sess.input_int(32, j, ALICE);
+        a[i][j] = sess.input<Int32>(ALICE, j);
     }
     sess.reveal(a[0][0][0], PUBLIC);
     sess.finalize();

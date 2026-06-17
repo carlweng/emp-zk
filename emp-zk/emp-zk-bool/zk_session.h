@@ -20,10 +20,10 @@
 // boundary before finalize() succeeds.
 //
 // I/O surface (mirrors emp-sh2pc's session):
-//   * input<V>/reveal<V> — generic over a fixed-width emp-tool WireValue V.
-//   * input_int/reveal_int — runtime-width ZKInt, the replacement for the old
-//     SignedInt(width,value,party) ctor and .reveal<T>(party). input_int
-//     ZERO-extends the bit pattern (Int_T::constant would sign-extend).
+//   * input<V>/reveal<V> — fixed-width: V is an emp-tool WireValue (compile-time
+//     width). Runtime-width: V is a RuntimeWidthValue (ZKUInt/ZKInt) and input
+//     takes a trailing width — input<ZKUInt>(owner, value, width); reveal reads
+//     the width off the value. ZKUInt reveals unsigned (uint64_t), ZKInt signed.
 //   * input_bits/reveal_bits — width-agnostic raw Ctx::Wire I/O (the boundary an
 //     IR-replay path such as execute_program speaks); use these instead of
 //     reaching into engine().feed_bits/reveal_bits.
@@ -34,6 +34,7 @@
 #include "emp-tool/ir/session/session_io.h"        // Session/DirectSession/SessionIO
 #include "emp-tool/ir/wire_value.h"                // WireValue
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -125,31 +126,40 @@ public:
         return std::optional<typename V::clear_t>(V::decode(bb.data()));
     }
 
-    // ---- runtime-width int I/O (replaces SignedInt(w,v,party) / .reveal<T>) ----
-    ZKInt input_int(int width, uint64_t value, int owner) {
+    // ---- runtime-width WireValue I/O (RuntimeWidthValue) ----
+    // Same statement boundary as the fixed input<V>/reveal<V>, but width is a
+    // runtime argument (input) / read off the value (reveal). The codec rides
+    // byte-bools (uint8_t 0/1); they are copied into real bool storage for the
+    // engine boundary here — a uint8_t* is never reinterpreted as a bool*.
+    template <RuntimeWidthValue V>
+    V input(int owner, const typename V::clear_t& value, int width) {
+        static_assert(std::same_as<typename V::context_type, DirectCtx>,
+                      "ZKBoolSession::input<V>: V must be a value over ZKBoolContext");
+        if (width < 1)
+            error("ZKBoolSession::input: runtime width must be >= 1");
+        const std::vector<uint8_t> bits = V::encode(value, width);
         auto bb = std::make_unique<bool[]>((size_t)width);
-        for (int i = 0; i < width; ++i)
-            bb[(size_t)i] = (i < 64) ? (((value >> i) & 1) != 0) : false;  // ZERO-extend
+        for (int i = 0; i < width; ++i) bb[(size_t)i] = (bits[(size_t)i] != 0);
         std::vector<ZKWire> w = input_bits(owner, bb.get(), (size_t)width);
-        return ZKInt::from_wires(ctx_, w.data(), width);
+        return V::from_wires(ctx_, w.data(), width);
     }
 
-    // Present only on a party that learns the value (recipient, or both for
-    // PUBLIC); std::nullopt otherwise. Both parties call in lockstep.
-    std::optional<uint64_t> reveal_int(const ZKInt& x, int recipient) {
+    template <RuntimeWidthValue V>
+    reveal_t<V> reveal(const V& v, int recipient) {
+        static_assert(std::same_as<typename V::context_type, DirectCtx>,
+                      "ZKBoolSession::reveal<V>: V must be a value over ZKBoolContext");
 #if EMP_CONTEXT_CHECKS
-        if (x.context() != &ctx_)
-            error("ZKBoolSession::reveal_int: value is bound to a different context");
+        if (v.context() != &ctx_)
+            error("ZKBoolSession::reveal: value is bound to a different context");
 #endif
         check_recipient_(recipient);
-        const int n = x.width();
+        const int n = v.width();
         auto bb = std::make_unique<bool[]>((size_t)n);
-        reveal_bits(bb.get(), recipient, x.data(), (size_t)n);  // x.data() is the ZKWire storage
+        reveal_bits(bb.get(), recipient, v.data(), (size_t)n);
         if (!has_value_(recipient)) return std::nullopt;
-        uint64_t v = 0;
-        for (int i = 0; i < n && i < 64; ++i)
-            v |= (uint64_t)(bb[(size_t)i] ? 1 : 0) << i;
-        return v;
+        std::vector<uint8_t> buf((size_t)n);
+        for (int i = 0; i < n; ++i) buf[(size_t)i] = (uint8_t)(bb[(size_t)i] ? 1 : 0);
+        return std::optional<typename V::clear_t>(V::decode(buf.data(), n));
     }
 
 private:
@@ -168,6 +178,8 @@ static_assert(Session<ZKBoolSession>);
 static_assert(DirectSession<ZKBoolSession>);
 static_assert(SessionIO<ZKBoolSession, UInt_T<ZKBoolContext, 32>>);
 static_assert(SessionIO<ZKBoolSession, Bit_T<ZKBoolContext>>);
+static_assert(RuntimeSessionIO<ZKBoolSession, ZKUInt>);
+static_assert(RuntimeSessionIO<ZKBoolSession, ZKInt>);
 
 }  // namespace emp
 #endif  // EMP_ZK_SESSION_H__

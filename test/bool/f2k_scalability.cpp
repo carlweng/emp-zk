@@ -13,7 +13,7 @@ const int W = 64;   // bit width of each fed value
 // feed W authenticated bits, then pack them into one F(2^128) element via
 // the local Σ·Xⁱ map (mac from the bit wires, val from the cleartext LSBs).
 static F2kAuthValue make_wire(ZKBoolSession &sess, uint64_t v) {
-  ZKInt x = sess.input_int(W, v, ALICE);
+  ZKInt x = sess.input<ZKInt>(ALICE, v, W);
   vector<F2kAuthValue> out;
   ramzk_pack_record(&sess.engine(), {&x}, out);
   return out[0];

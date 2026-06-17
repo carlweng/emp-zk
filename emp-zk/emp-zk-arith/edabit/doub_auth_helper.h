@@ -16,7 +16,7 @@ using namespace std;
 
 class DoubAuthHelper {
 public:
-  ZKBoolSession &zk;     // bool session: source of reveal_int + the bool engine
+  ZKBoolSession &zk;     // bool session: source of reveal + the bool engine
   int party;
   BoolIO *io;
   Hash hash;
@@ -60,12 +60,12 @@ public:
   // that invariant because both sides land at the same plaintext.
   void open_check_send(uint64_t *val, ZKInt *dat_f2, int64_t len) {
     for (int64_t i = 0; i < len; ++i)
-      val[i] = zk.reveal_int(dat_f2[i], PUBLIC).value_or(0);
+      val[i] = zk.reveal(dat_f2[i], PUBLIC).value_or(0);
   }
 
   void open_check_recv(uint64_t *val, ZKInt *dat_f2, int64_t len) {
     for (int64_t i = 0; i < len; ++i)
-      val[i] = zk.reveal_int(dat_f2[i], PUBLIC).value_or(0);
+      val[i] = zk.reveal(dat_f2[i], PUBLIC).value_or(0);
   }
 
   /* --------------------- open and check ----------------------*/

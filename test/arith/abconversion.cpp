@@ -24,9 +24,9 @@ void test_mix_circuit(BoolIO *ios[threads], int party, int sz) {
 
   ZKInt *y = new ZKInt[sz];
   for (int i = 0; i < sz; ++i)
-    y[i] = sess.input_int(62, a[i], ALICE);
+    y[i] = sess.input<ZKInt>(ALICE, a[i], 62);
 
-  ZKInt PR_bl = sess.input_int(62, PR, PUBLIC);
+  ZKInt PR_bl = sess.input<ZKInt>(PUBLIC, PR, 62);
 
   sess.flush();
 
@@ -55,7 +55,7 @@ void test_mix_circuit(BoolIO *ios[threads], int party, int sz) {
 
   int incorrect_cnt = 0;
   for (int i = 0; i < sz; ++i) {
-    ZKBit ret = (y[i] == sess.input_int(62, a[i], PUBLIC));
+    ZKBit ret = (y[i] == sess.input<ZKInt>(PUBLIC, a[i], 62));
     if (sess.reveal(ret, PUBLIC).value_or(false) != 1)
       incorrect_cnt++;
   }

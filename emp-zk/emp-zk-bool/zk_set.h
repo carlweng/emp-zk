@@ -24,7 +24,7 @@ public:
   int64_t elem_sz;       // bit width of an element (and of queried values)
   int64_t ver_sz;        // version field; per-element queries ≤ T
   vector<uint64_t> ver;  // ALICE: latest version per element, indexed by value
-  ZKBoolSession &zk;     // owns the engine; source of input_int / reveal_int
+  ZKBoolSession &zk;     // owns the engine; source of runtime input/reveal
   ZKBoolBase *bb;
   ZKPermProof perm;      // A = reads (queries + teardown), B = writes (setup)
   vector<F2kAuthValue> elem_;
@@ -35,24 +35,24 @@ public:
     if (party == ALICE)
       ver.assign((size_t)T + 1, 0);
     // Setup: write (e, version 0) for every element of the public range.
-    ZKInt ver0 = zk.input_int(ver_sz, 0, PUBLIC);
+    ZKUInt ver0 = zk.input<ZKUInt>(PUBLIC, 0, ver_sz);
     for (int64_t e = 1; e <= T; ++e)
-      emit_(/*toA=*/false, zk.input_int(elem_sz, (uint64_t)e, PUBLIC), ver0);
+      emit_(/*toA=*/false, zk.input<ZKUInt>(PUBLIC, (uint64_t)e, elem_sz), ver0);
   }
 
   // Prove that the committed value v ∈ {1, …, T}. Appends a (v, ver) read and
   // a (v, ver+1) write, mirroring a ROM lookup of key v.
-  void prove_member(const ZKInt &v) {
-    uint64_t e = zk.reveal_int(v, ALICE).value_or(0);
+  void prove_member(const ZKUInt &v) {
+    uint64_t e = zk.reveal(v, ALICE).value_or(0);
     // ver is indexed by the queried value (size T+1). An out-of-range witness
     // reads a default version (no local OOB) and is rejected by the closing perm
     // check — a query outside {1..T} chains to no setup write — rather than
     // aborting the prover here.
     const bool in_range = (e <= (uint64_t)T);
     uint64_t vv = (party == ALICE && in_range) ? ver[e] : 0;
-    ZKInt ver_old = zk.input_int(ver_sz, vv, ALICE);
+    ZKUInt ver_old = zk.input<ZKUInt>(ALICE, vv, ver_sz);
     emit_(/*toA=*/true, v, ver_old);                                    // read
-    emit_(/*toA=*/false, v, ver_old + zk.input_int(ver_sz, 1, PUBLIC)); // write
+    emit_(/*toA=*/false, v, ver_old + zk.input<ZKUInt>(PUBLIC, 1, ver_sz)); // write
     if (party == ALICE && in_range)
       ver[e] = vv + 1;
   }
@@ -61,14 +61,14 @@ public:
   void check() {
     for (int64_t e = 1; e <= T; ++e) {
       uint64_t vv = (party == ALICE) ? ver[e] : 0;
-      emit_(/*toA=*/true, zk.input_int(elem_sz, (uint64_t)e, PUBLIC),
-            zk.input_int(ver_sz, vv, ALICE));
+      emit_(/*toA=*/true, zk.input<ZKUInt>(PUBLIC, (uint64_t)e, elem_sz),
+            zk.input<ZKUInt>(ALICE, vv, ver_sz));
     }
     perm.check_eq();
   }
 
 private:
-  void emit_(bool toA, const ZKInt &element, const ZKInt &version) {
+  void emit_(bool toA, const ZKUInt &element, const ZKUInt &version) {
     elem_.clear();
     ramzk_pack_record(bb, {&element, &version}, elem_);
     if (toA)

@@ -22,11 +22,11 @@ void test(BoolIO *ios[threads], int party, bool bad) {
   // Query each element of {1..T}, several elements repeatedly (chains).
   for (int rep = 0; rep < 3; ++rep)
     for (int64_t e = 1; e <= T; ++e)
-      s->prove_member(sess.input_int(elem_sz, (uint64_t)e, ALICE));
+      s->prove_member(sess.input<ZKUInt>(ALICE, (uint64_t)e, elem_sz));
 
   // Soundness: 0 ∉ {1..T}, so this query cannot be chained to a setup write.
   if (bad)
-    s->prove_member(sess.input_int(elem_sz, (uint64_t)0, ALICE));
+    s->prove_member(sess.input<ZKUInt>(ALICE, (uint64_t)0, elem_sz));
 
   s->check();
   sess.finalize();

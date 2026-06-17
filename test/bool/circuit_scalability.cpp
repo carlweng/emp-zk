@@ -7,6 +7,7 @@ using namespace std;
 
 int port, party;
 const int threads = 1;
+using Int32 = Int_T<ZKBoolContext, 32>;   // signed, fixed width: a WireValue
 
 void test_circuit_zk(BoolIO *ios[threads], int party, int input_sz_lg) {
 
@@ -16,9 +17,9 @@ void test_circuit_zk(BoolIO *ios[threads], int party, int input_sz_lg) {
   // the whole proof's COT draws are wire-free (minimal round-trips).
   ZKBoolSession sess(ios[0], party, 100LL * input_sz);
   auto start = clock_start();
-  ZKInt a = sess.input_int(32, 2, ALICE);
-  ZKInt b = sess.input_int(32, 3, ALICE);
-  ZKInt c = sess.input_int(32, 0, PUBLIC);
+  Int32 a = sess.input<Int32>(ALICE, 2);
+  Int32 b = sess.input<Int32>(ALICE, 3);
+  Int32 c = sess.input<Int32>(PUBLIC, 0);
   // Int_T::operator[] returns a Bit by value (not a writable ref like the old
   // SignedInt), so mutate individual bits through the public wire storage .w[].
   for (int i = 0; i < input_sz; ++i) {

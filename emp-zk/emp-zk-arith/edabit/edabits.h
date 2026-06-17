@@ -44,7 +44,7 @@ public:
   uint32_t Bm1, ell_faulty;
 
   ZKInt int_boo_pr, int_boo_zero, int_boo_pr_plus_two;
-  ZKBoolSession &zk;   // bool session: input_int + the bool engine
+  ZKBoolSession &zk;   // bool session: runtime input + the bool engine
 
   EdaBits(ZKBoolSession &zk, BoolIO *io, FpVOLE<AuthValueFp> *cot_fp) : zk(zk) {
     this->party = zk.party();
@@ -70,9 +70,9 @@ public:
 
     auth_helper = new DoubAuthHelper(zk, io);
 
-    int_boo_pr = zk.input_int(62, PR, PUBLIC);
-    int_boo_zero = zk.input_int(62, 0, PUBLIC);
-    int_boo_pr_plus_two = zk.input_int(62, PR + 2, PUBLIC); // TODO why????
+    int_boo_pr = zk.input<ZKInt>(PUBLIC, PR, 62);
+    int_boo_zero = zk.input<ZKInt>(PUBLIC, 0, 62);
+    int_boo_pr_plus_two = zk.input<ZKInt>(PUBLIC, PR + 2, 62); // TODO why????
   }
 
   ~EdaBits() {
@@ -99,11 +99,11 @@ public:
     // Input \ell Fp shares into boolean circuits
     if (party == ALICE) {
       for (uint32_t i = 0; i < ell; ++i)
-        bool_candidate[i] = zk.input_int(
-            62, VAL(arith_candidate[np_pt + i]), ALICE);
+        bool_candidate[i] = zk.input<ZKInt>(ALICE, VAL(arith_candidate[np_pt + i]), 
+            62);
     } else {
       for (uint32_t i = 0; i < ell; ++i)
-        bool_candidate[i] = zk.input_int(62, 0, ALICE);
+        bool_candidate[i] = zk.input<ZKInt>(ALICE, 0, 62);
     }
     zk.flush();
 
@@ -211,7 +211,7 @@ public:
     else
       auth_helper->open_check_recv(&sum, &sum_fp, 1);
 
-    ZKInt sum_boo = zk.input_int(62, sum, PUBLIC);
+    ZKInt sum_boo = zk.input<ZKInt>(PUBLIC, sum, 62);
     sum_boo = sum_boo - bool_candidate[edab_f2];
     return sum_boo.select(sum_boo[61], sum_boo + int_boo_pr);
   }
@@ -236,7 +236,7 @@ public:
         auth_helper->open_check_recv(sum.data(), sum_fp.data(), num);
       io->flush();
       for (int64_t i = 0; i < num; ++i) {
-        ZKInt sum_boo = zk.input_int(62, sum[i], PUBLIC);
+        ZKInt sum_boo = zk.input<ZKInt>(PUBLIC, sum[i], 62);
         sum_boo = sum_boo - bool_candidate[edab_f2[i]];
         out[off + i] =
             sum_boo.select(sum_boo[61], sum_boo + int_boo_pr);

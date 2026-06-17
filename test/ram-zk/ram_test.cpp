@@ -24,9 +24,9 @@ void test(BoolIO *ios[threads], int party, bool bad) {
   int rounds = 4;
   int64_t T = (int64_t)rounds * cells * 2;   // each sweep: 1 write + 1 read / cell
 
-  vector<ZKInt> data;
+  vector<ZKUInt> data;
   for (int i = 0; i < cells; ++i)
-    data.push_back(sess.input_int(val_sz, i, ALICE));
+    data.push_back(sess.input<ZKUInt>(ALICE, i, val_sz));
 
   ZKRam *ram = new ZKRam(sess, index_sz, val_sz, T);
   ram->init(data);
@@ -43,10 +43,10 @@ void test(BoolIO *ios[threads], int party, bool bad) {
   for (int r = 0; r < rounds; ++r)
     for (int i = 0; i < cells; ++i) {
       expect[i] += cells;
-      ram->write(sess.input_int(index_sz, i, PUBLIC),
-                 sess.input_int(val_sz, expect[i], ALICE));
-      ZKInt got = ram->read(sess.input_int(index_sz, i, PUBLIC));
-      ZKBit eq = got == sess.input_int(val_sz, expect[i], ALICE);
+      ram->write(sess.input<ZKUInt>(PUBLIC, i, index_sz),
+                 sess.input<ZKUInt>(ALICE, expect[i], val_sz));
+      ZKUInt got = ram->read(sess.input<ZKUInt>(PUBLIC, i, index_sz));
+      ZKBit eq = got == sess.input<ZKUInt>(ALICE, expect[i], val_sz);
       if (!sess.reveal(eq, PUBLIC).value_or(false))
         wrong++;
     }

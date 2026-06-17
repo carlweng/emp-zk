@@ -14,9 +14,9 @@ void test(BoolIO *ios[threads], int party, bool bad) {
   int test_n = (1 << index_sz);   // number of cells
 
   // Memory content x[i] = 2*i.
-  vector<ZKInt> data;
+  vector<ZKUInt> data;
   for (int i = 0; i < test_n; ++i)
-    data.push_back(sess.input_int(val_sz, 2 * i, ALICE));
+    data.push_back(sess.input<ZKUInt>(ALICE, 2 * i, val_sz));
 
   int rounds = 8;
   int64_t T = (int64_t)rounds * test_n;   // number of lookups
@@ -34,8 +34,8 @@ void test(BoolIO *ios[threads], int party, bool bad) {
   int wrong = 0;
   for (int r = 0; r < rounds; ++r)
     for (int i = 0; i < test_n; ++i) {
-      ZKInt res = rom->read(sess.input_int(index_sz, i, PUBLIC));
-      ZKBit eq = res == sess.input_int(val_sz, i * 2, ALICE);
+      ZKUInt res = rom->read(sess.input<ZKUInt>(PUBLIC, i, index_sz));
+      ZKBit eq = res == sess.input<ZKUInt>(ALICE, i * 2, val_sz);
       if (!sess.reveal(eq, PUBLIC).value_or(false)) wrong++;
     }
   rom->check();   // proves reads ∼ writes; aborts on a forged read

@@ -20,6 +20,7 @@ include(CMakePackageConfigHelpers)
 # Options
 # ---------------------------------------------------------------------
 option(EMP_ZK_BUILD_TESTS "Build emp-zk tests"            ${PROJECT_IS_TOP_LEVEL})
+option(EMP_ZK_BUILD_BENCHMARKS "Build emp-zk benchmarks (build-only, not ctest)" OFF)
 option(EMP_ZK_INSTALL     "Generate install / export rules" ${PROJECT_IS_TOP_LEVEL})
 
 # ---------------------------------------------------------------------
@@ -97,4 +98,8 @@ export(EXPORT emp-zkTargets
 if(EMP_ZK_BUILD_TESTS)
     include(CTest)
     add_subdirectory(test)
+endif()
+
+if(EMP_ZK_BUILD_BENCHMARKS)
+    add_subdirectory(bench)   # performance benchmarks (build-only)
 endif()

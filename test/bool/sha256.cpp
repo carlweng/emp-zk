@@ -51,7 +51,7 @@ int main(int argc, char **argv) {
     wit[(size_t)i] = (uint8_t)(((uint32_t)i * 0x9e3779b9u) >> 19) & 1u;
 
   auto zin = feed_wires(sess, ALICE, wit);
-  auto zout = execute_program(sess.direct_ctx(), prog,
+  auto zout = execute_program(sess.ctx(), prog,
                               std::span<const ZKWire>(zin.data(), zin.size()));
   auto zdig = reveal_wires(sess, PUBLIC, zout);
 

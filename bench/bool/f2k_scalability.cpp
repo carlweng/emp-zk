@@ -1,4 +1,4 @@
-#include "../test_io_helpers.h"
+#include "../../test/test_io_helpers.h"
 #include "emp-tool/emp-tool.h"
 #include <emp-zk/emp-zk.h>
 #include <iostream>

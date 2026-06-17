@@ -4,7 +4,7 @@
 // ZKBoolSession — the PUBLIC HANDLE for emp-zk-bool zero-knowledge proofs, and
 // the emp-tool Session / DirectSession / SessionIO model for the ZK boolean
 // context. It owns the proof engine (a ZKBoolProver on ALICE, ZKBoolVerifier on
-// BOB), exposes the gate context via direct_ctx(), and is the I/O boundary
+// BOB), exposes the gate context via ctx(), and is the I/O boundary
 // (input / reveal / input_bits / reveal_bits). There is NO global backend: every
 // gadget receives a ZKBoolSession& explicitly and reaches the engine via engine().
 //
@@ -43,7 +43,7 @@ namespace emp {
 
 class ZKBoolSession {
 public:
-    using DirectCtx = ZKBoolContext;
+    using ctx_t = ZKBoolContext;
     template <class V> using reveal_t = std::optional<typename V::clear_t>;
 
     // party = ALICE (prover) or BOB (verifier). `io` is caller-owned.
@@ -70,7 +70,7 @@ public:
     void finalize() { delete eng_; eng_ = nullptr; }
 
     int party() const { return eng_->party; }
-    DirectCtx& direct_ctx() { return ctx_; }
+    ctx_t& ctx() { return ctx_; }
     ZKBoolBase& engine() { return *eng_; }
     uint64_t num_and() const { return eng_->num_and(); }
     void flush() { eng_->io->flush(); }
@@ -100,7 +100,7 @@ public:
     // ---- generic fixed-width WireValue I/O ----
     template <WireValue V>
     V input(int owner, const typename V::clear_t& clear) {
-        static_assert(std::same_as<typename V::context_type, DirectCtx>,
+        static_assert(std::same_as<typename V::context_type, ctx_t>,
                       "ZKBoolSession::input<V>: V must be a value over ZKBoolContext");
         constexpr int W = V::width();
         const std::array<bool, (std::size_t)W> bits = V::encode(clear);   // stack; width is the type
@@ -110,7 +110,7 @@ public:
 
     template <WireValue V>
     reveal_t<V> reveal(const V& v, int recipient) {
-        static_assert(std::same_as<typename V::context_type, DirectCtx>,
+        static_assert(std::same_as<typename V::context_type, ctx_t>,
                       "ZKBoolSession::reveal<V>: V must be a value over ZKBoolContext");
 #if EMP_CONTEXT_CHECKS
         if (v.context() != &ctx_)
@@ -133,7 +133,7 @@ public:
     // engine boundary here — a uint8_t* is never reinterpreted as a bool*.
     template <RuntimeWidthValue V>
     V input(int owner, const typename V::clear_t& value, int width) {
-        static_assert(std::same_as<typename V::context_type, DirectCtx>,
+        static_assert(std::same_as<typename V::context_type, ctx_t>,
                       "ZKBoolSession::input<V>: V must be a value over ZKBoolContext");
         if (width < 1)
             error("ZKBoolSession::input: runtime width must be >= 1");
@@ -146,7 +146,7 @@ public:
 
     template <RuntimeWidthValue V>
     reveal_t<V> reveal(const V& v, int recipient) {
-        static_assert(std::same_as<typename V::context_type, DirectCtx>,
+        static_assert(std::same_as<typename V::context_type, ctx_t>,
                       "ZKBoolSession::reveal<V>: V must be a value over ZKBoolContext");
 #if EMP_CONTEXT_CHECKS
         if (v.context() != &ctx_)

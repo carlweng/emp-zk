@@ -44,7 +44,7 @@ static std::vector<uint8_t> reveal_wires(ZKBoolSession &sess, int recipient,
 
 void run(BoolIO *ios[threads], int party) {
   ZKBoolSession sess(ios[0], party);
-  ZKBoolContext &ctx = sess.direct_ctx();
+  ZKBoolContext &ctx = sess.ctx();
 
   // (1) Typed UInt32 add over the ZK context, via the session's generic
   // WireValue input/reveal (UInt_T<ZKBoolContext,32>).

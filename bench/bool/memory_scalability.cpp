@@ -4,7 +4,7 @@
 // replay streams gates through the session rather than materializing the whole
 // circuit. C++20.
 
-#include "../test_io_helpers.h"
+#include "../../test/test_io_helpers.h"
 #include "emp-tool/emp-tool.h"
 #include "emp-tool/ir/context/clear.h"
 #include "emp-tool/ir/builtins.h"
@@ -45,7 +45,7 @@ int main(int argc, char **argv) {
   make_bool_ios(ios, party, port);
 
   ZKBoolSession sess(ios[0], party);
-  ZKBoolContext &ctx = sess.direct_ctx();
+  ZKBoolContext &ctx = sess.ctx();
   const circuit::BooleanProgram &prog = circuit::builtin_circuit("sha256_256");
   const int nin = (int)prog.num_inputs;
 

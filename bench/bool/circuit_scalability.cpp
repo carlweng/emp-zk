@@ -1,4 +1,4 @@
-#include "../test_io_helpers.h"
+#include "../../test/test_io_helpers.h"
 #include "emp-tool/emp-tool.h"
 #include <emp-zk/emp-zk.h>
 #include <iostream>
@@ -32,7 +32,7 @@ void test_circuit_zk(BoolIO *ios[threads], int party, int input_sz_lg) {
       b.w[j + 2] = (a[j + 4] & b[j + 10]).w;
     c = a ^ b;
   }
-  ZKBit ret = ZKBit::constant(sess.direct_ctx(), false);
+  ZKBit ret = ZKBit::constant(sess.ctx(), false);
   bool ret_b = sess.reveal(ret, PUBLIC).value_or(false);
   sess.finalize();
   cout << 100 * input_sz << "\t" << time_from(start) << " " << party << endl;

@@ -26,16 +26,13 @@ add_test_case_with_run(bool example)
 # bit-for-bit against a ClearCtx replay of the same circuit.
 add_test_case_with_run(bool test_context_zk)
 add_test_case_with_run(bool bool_io)
-add_test_case_with_run(bool input_scalability)
-add_test_case_with_run(bool circuit_scalability)
-add_test_case_with_run(bool f2k_scalability)
 add_test_case_with_run(bool perm_proof)
 add_test_case_with_run(bool polynomial)
 add_test_case_with_run(bool inner_prdt)
-# ZK SHA-256 and memory/throughput on the IR-replay model: the sha256_256 builtin
-# replayed over the ZK context and validated against a ClearCtx replay.
+# ZK SHA-256 on the IR-replay model: the sha256_256 builtin replayed over the ZK
+# context and validated against a ClearCtx replay.
 add_test_case_with_run(bool sha256)
-add_test_case_with_run(bool memory_scalability)
+# (input/circuit/f2k/memory _scalability are build-only benchmarks — see ../bench)
 
 # Arithmetic ZK
 add_test_case_with_run(arith abconversion)
@@ -44,8 +41,7 @@ add_test_case_with_run(arith abconversion)
 set_tests_properties(arith_abconversion PROPERTIES LABELS slow)
 add_test_case_with_run(arith zk_proof)
 add_test_case_with_run(arith ostriple)
-add_test_case_with_run(arith input_scalability)
-add_test_case_with_run(arith circuit_scalability)
+# (input/circuit _scalability are build-only benchmarks — see ../bench)
 add_test_case_with_run(arith polynomial)
 add_test_case_with_run(arith inner_prdt)
 add_test_case_with_run(arith matrix_mul)

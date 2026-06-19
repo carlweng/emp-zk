@@ -3,7 +3,6 @@
 // ClearCtx replay of the same .empbc — the IR-replay path exercised in zero
 // knowledge. C++20.
 
-#include "../test_io_helpers.h"
 #include "emp-tool/emp-tool.h"
 #include "emp-tool/ir/context/clear.h"
 #include "emp-tool/ir/builtins.h"
@@ -16,8 +15,7 @@
 
 using namespace emp;
 
-int port, party;
-const int threads = 1;
+int party;
 
 static std::vector<ZKWire> feed_wires(ZKBoolSession &sess, int owner,
                                       const std::vector<uint8_t> &bits) {
@@ -37,11 +35,11 @@ static std::vector<uint8_t> reveal_wires(ZKBoolSession &sess, int recipient,
 }
 
 int main(int argc, char **argv) {
-  parse_party_and_port(argv, &party, &port);
-  BoolIO *ios[threads];
-  make_bool_ios(ios, party, port);
+  party = parse_party(argv);
+  auto netio = (party == ALICE) ? NetIO::listen(peer_port()) : NetIO::connect(peer_ip(), peer_port());
+  BoolIO io(netio.get(), party == ALICE);
 
-  ZKBoolSession sess(ios[0], party);
+  ZKBoolSession sess(&io, party);
   const circuit::BooleanProgram &prog = circuit::builtin_circuit("sha256_256");
   const int nin = (int)prog.num_inputs;
 
@@ -66,6 +64,5 @@ int main(int argc, char **argv) {
   if (party == ALICE)
     printf("ZK sha256_256 replay (%zu output bits) — PASS\n", cout.size());
 
-  destroy_bool_ios(ios);
   return 0;
 }

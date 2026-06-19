@@ -4,19 +4,18 @@
 using namespace emp;
 using namespace std;
 
-int port, party;
-const int threads = 1;
+int party;
 
-void test_circuit_zk(BoolIO *ios[threads + 1], int party,
+void test_circuit_zk(BoolIO *io, int party,
                      int input_sz_lg) {
 
   long long test_n = 1 << input_sz_lg;
   auto start = clock_start();
-  setup_zk_arith(ios[0], party);
+  setup_zk_arith(io, party);
   auto timesetup = time_from(start);
   cout << "time for setup: " << timesetup * 1000 << " " << party << " " << endl;
 
-  //	ios[0]->sync();
+  //	io->sync();
   start = clock_start();
   __uint128_t ar = 2, br = 3, cr = 4;
   IntFp a((uint64_t)ar, ALICE);
@@ -50,12 +49,9 @@ void test_circuit_zk(BoolIO *ios[threads + 1], int party,
 }
 
 int main(int argc, char **argv) {
-  parse_party_and_port(argv, &party, &port);
-  BoolIO *ios[threads + 1];
-  for (int i = 0; i < threads + 1; ++i)
-    ios[i] = new BoolIO(
-        new NetIO(party == ALICE ? nullptr : "127.0.0.1", port + i),
-        party == ALICE);
+  party = parse_party(argv);
+  auto netio = (party == ALICE) ? NetIO::listen(peer_port()) : NetIO::connect(peer_ip(), peer_port());
+  BoolIO io(netio.get(), party == ALICE);
 
   std::cout << std::endl
             << "------------ circuit zero-knowledge proof test ------------"
@@ -64,21 +60,16 @@ int main(int argc, char **argv) {
   ;
 
   int num = 0;
-  if (argc < 3) {
-    std::cout << "usage: [binary] PARTY PORT LOG(NUM_GATES)" << std::endl;
+  if (argc < 2) {
+    std::cout << "usage: [binary] PARTY LOG(NUM_GATES)" << std::endl;
     return -1;
-  } else if (argc == 3) {
+  } else if (argc == 2) {
     num = 16;
   } else {
-    num = atoi(argv[3]);
+    num = atoi(argv[2]);
   }
 
-  test_circuit_zk(ios, party, num);
+  test_circuit_zk(&io, party, num);
 
-  for (int i = 0; i < threads + 1; ++i) {
-    NetIO *raw = static_cast<NetIO *>(ios[i]->io);
-    delete ios[i];
-    delete raw;
-  }
   return 0;
 }

@@ -1,21 +1,21 @@
 #include "emp-tool/emp-tool.h"
+#include <emp-zk/emp-zk.h>
 #include "emp-zk/emp-zk-arith/emp-zk-arith.h"
 #include <iostream>
 
 using namespace emp;
 using namespace std;
 
-int port, party;
+int party;
 int repeat, sz;
-const int threads = 1;
 
-void test_polynomial(BoolIO *ios[threads], int party) {
+void test_polynomial(BoolIO *io, int party) {
   srand(time(NULL));
   uint64_t *coeff = new uint64_t[sz + 1];
   uint64_t *witness = new uint64_t[2 * sz];
   memset(witness, 0, 2 * sz * sizeof(uint64_t));
 
-  setup_zk_arith(ios[0], party);
+  setup_zk_arith(io, party);
 
   IntFp *x = new IntFp[2 * sz];
 
@@ -31,9 +31,9 @@ void test_polynomial(BoolIO *ios[threads], int party) {
       sum = add_mod(sum, mult_mod(coeff[i + 1], tmp));
     }
     coeff[0] = PR - sum;
-    ios[0]->send_data(coeff, (sz + 1) * sizeof(uint64_t));
+    io->send_data(coeff, (sz + 1) * sizeof(uint64_t));
   } else {
-    ios[0]->recv_data(coeff, (sz + 1) * sizeof(uint64_t));
+    io->recv_data(coeff, (sz + 1) * sizeof(uint64_t));
   }
 
   for (int i = 0; i < 2 * sz; ++i)
@@ -57,36 +57,28 @@ void test_polynomial(BoolIO *ios[threads], int party) {
 }
 
 int main(int argc, char **argv) {
-  parse_party_and_port(argv, &party, &port);
-  BoolIO *ios[threads];
-  for (int i = 0; i < threads; ++i)
-    ios[i] = new BoolIO(
-        new NetIO(party == ALICE ? nullptr : "127.0.0.1", port + i),
-        party == ALICE);
+  party = parse_party(argv);
+  auto netio = (party == ALICE) ? NetIO::listen(peer_port()) : NetIO::connect(peer_ip(), peer_port());
+  BoolIO io(netio.get(), party == ALICE);
 
   std::cout << std::endl << "------------ ";
   std::cout << "ZKP polynomial test";
   std::cout << " ------------" << std::endl << std::endl;
   ;
 
-  if (argc < 3) {
-    std::cout << "usage: [binary] PARTY PORT POLY_NUM POLY_DIMENSION"
+  if (argc < 2) {
+    std::cout << "usage: [binary] PARTY POLY_NUM POLY_DIMENSION"
               << std::endl;
     return -1;
-  } else if (argc < 5) {
+  } else if (argc < 4) {
     repeat = 100;
     sz = 10;
   } else {
-    repeat = atoi(argv[3]);
-    sz = atoi(argv[4]);
+    repeat = atoi(argv[2]);
+    sz = atoi(argv[3]);
   }
 
-  test_polynomial(ios, party);
+  test_polynomial(&io, party);
 
-  for (int i = 0; i < threads; ++i) {
-    NetIO *raw = static_cast<NetIO *>(ios[i]->io);
-    delete ios[i];
-    delete raw;
-  }
   return 0;
 }

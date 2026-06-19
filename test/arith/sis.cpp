@@ -13,10 +13,9 @@
 using namespace emp;
 using namespace std;
 
-int port, party;
-const int threads = 1;
+int party;
 
-void test_sis_proof(BoolIO *ios[threads + 1], int party, int n, int m) {
+void test_sis_proof(BoolIO *io, int party, int n, int m) {
 
   srand(time(NULL));
 
@@ -40,7 +39,7 @@ void test_sis_proof(BoolIO *ios[threads + 1], int party, int n, int m) {
 
   int repeat = 485;
   auto start = clock_start();
-  setup_zk_arith(ios[0], party);
+  setup_zk_arith(io, party);
 
   // allocation
   IntFp *vec_s = new IntFp[m];
@@ -110,12 +109,9 @@ void test_sis_proof(BoolIO *ios[threads + 1], int party, int n, int m) {
 }
 
 int main(int argc, char **argv) {
-  parse_party_and_port(argv, &party, &port);
-  BoolIO *ios[threads + 1];
-  for (int i = 0; i < threads + 1; ++i)
-    ios[i] = new BoolIO(
-        new NetIO(party == ALICE ? nullptr : "127.0.0.1", port + i),
-        party == ALICE);
+  party = parse_party(argv);
+  auto netio = (party == ALICE) ? NetIO::listen(peer_port()) : NetIO::connect(peer_ip(), peer_port());
+  BoolIO io(netio.get(), party == ALICE);
 
   std::cout << std::endl
             << "------------ circuit zero-knowledge proof test ------------"
@@ -123,14 +119,9 @@ int main(int argc, char **argv) {
             << std::endl;
   ;
 
-  test_sis_proof(ios, party, 8, 16);
-  //	test_sis_proof(ios, party, 1024, 4096);
-  //	test_sis_proof(ios, party, 256, 256*61);
+  test_sis_proof(&io, party, 8, 16);
+  //	test_sis_proof(io, party, 1024, 4096);
+  //	test_sis_proof(io, party, 256, 256*61);
 
-  for (int i = 0; i < threads + 1; ++i) {
-    NetIO *raw = static_cast<NetIO *>(ios[i]->io);
-    delete ios[i];
-    delete raw;
-  }
   return 0;
 }

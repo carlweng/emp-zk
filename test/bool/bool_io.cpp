@@ -5,10 +5,10 @@ using namespace emp;
 using namespace std;
 const int LL = 1024 * 1024 * 100 + 10;
 int main(int argc, char **argv) {
-  int party, port;
-  parse_party_and_port(argv, &party, &port);
-  NetIO *netio = new NetIO(party == ALICE ? nullptr : "127.0.0.1", port, false);
-  BoolIO *io = new BoolIO(netio, party == ALICE);
+  int party = parse_party(argv);
+  auto netio = (party == ALICE) ? NetIO::listen(peer_port(), false)
+                                : NetIO::connect(peer_ip(), peer_port(), false);
+  BoolIO io(netio.get(), party == ALICE);
   bool *data = new bool[LL];
   bool *data2 = new bool[LL];
 
@@ -29,12 +29,12 @@ int main(int argc, char **argv) {
   auto t1 = clock_start();
   if (party == ALICE) {
     for (int i = 0; i < LL; ++i)
-      io->send_bit(data[i]);
+      io.send_bit(data[i]);
   } else {
     for (int i = 0; i < LL; ++i)
-      data[i] = io->recv_bit();
+      data[i] = io.recv_bit();
   }
-  io->flush();
+  io.flush();
   cout << time_from(t1) / LL * 1000 << "\n";
   if (party == BOB) {
     PRG prg2(&test_seed);
@@ -44,7 +44,5 @@ int main(int argc, char **argv) {
     else
       cout << "fine!\n";
   }
-  delete io;
-  delete netio;
   return 0;
 }

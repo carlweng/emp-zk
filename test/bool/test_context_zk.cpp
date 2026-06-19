@@ -4,7 +4,6 @@
 // (2) an IR-replay builtin (sha256_256) run over the ZK context, validated
 // bit-for-bit against a ClearCtx replay of the same circuit. C++20.
 
-#include "../test_io_helpers.h"
 #include "emp-tool/emp-tool.h"
 #include "emp-tool/ir/context/clear.h"   // ClearCtx
 #include "emp-tool/ir/builtins.h"        // circuit::builtin_circuit
@@ -18,8 +17,7 @@
 
 using namespace emp;
 
-int port, party;
-const int threads = 1;
+int party;
 static int fails = 0;
 
 // Feed cleartext bits as authenticated ZK wires owned by `owner` (ALICE witness
@@ -42,13 +40,13 @@ static std::vector<uint8_t> reveal_wires(ZKBoolSession &sess, int recipient,
   return out;
 }
 
-void run(BoolIO *ios[threads], int party) {
-  ZKBoolSession sess(ios[0], party);
-  ZKBoolContext &ctx = sess.ctx();
+void run(BoolIO *io, int party) {
+  ZKBoolSession sess(io, party);
+  ZKBoolSession::ctx_t &ctx = sess.ctx();
 
   // (1) Typed UInt32 add over the ZK context, via the session's generic
-  // WireValue input/reveal (UInt_T<ZKBoolContext,32>).
-  using U32 = UInt_T<ZKBoolContext, 32>;
+  // WireValue input/reveal (UInt_T<ZKBoolSession::ctx_t,32>).
+  using U32 = UInt_T<ZKBoolSession::ctx_t, 32>;
   const uint32_t x = 0x12345678u, y = 0x9abcdef0u;
   U32 a = sess.input<U32>(ALICE, x);
   U32 b = sess.input<U32>(ALICE, y);
@@ -89,10 +87,9 @@ void run(BoolIO *ios[threads], int party) {
 }
 
 int main(int argc, char **argv) {
-  parse_party_and_port(argv, &party, &port);
-  BoolIO *ios[threads];
-  make_bool_ios(ios, party, port);
-  run(ios, party);
-  destroy_bool_ios(ios);
+  party = parse_party(argv);
+  auto netio = (party == ALICE) ? NetIO::listen(peer_port()) : NetIO::connect(peer_ip(), peer_port());
+  BoolIO io(netio.get(), party == ALICE);
+  run(&io, party);
   return fails ? 1 : 0;
 }

@@ -1,12 +1,12 @@
 #include "emp-zk/emp-zk-arith/ostriple.h"
 #include "emp-zk/emp-zk-bool/emp-zk-bool.h"
 #include "emp-tool/emp-tool.h"
+#include <emp-zk/emp-zk.h>
 #include <iostream>
 using namespace emp;
 using namespace std;
 
-int port, party;
-const int threads = 1;
+int party;
 
 void test_auth_bit_input(FpOSTriple *os) {
   PRG prg;
@@ -76,9 +76,9 @@ void test_compute_and_gate_check(FpOSTriple *os) {
   delete[] c;
 }
 
-void test_ostriple(BoolIO *ios[threads], int party) {
+void test_ostriple(BoolIO *io, int party) {
   auto t1 = clock_start();
-  FpOSTriple os(party, ios[0]);
+  FpOSTriple os(party, io);
   cout << party << "\tconstructor\t" << time_from(t1) << " us" << endl;
 
   test_auth_bit_input(&os);
@@ -91,24 +91,16 @@ void test_ostriple(BoolIO *ios[threads], int party) {
 }
 
 int main(int argc, char **argv) {
-  parse_party_and_port(argv, &party, &port);
-  BoolIO *ios[threads];
-  for (int i = 0; i < threads; ++i)
-    ios[i] = new BoolIO(
-        new NetIO(party == ALICE ? nullptr : "127.0.0.1", port + i),
-        party == ALICE);
+  party = parse_party(argv);
+  auto netio = (party == ALICE) ? NetIO::listen(peer_port()) : NetIO::connect(peer_ip(), peer_port());
+  BoolIO io(netio.get(), party == ALICE);
 
   std::cout << std::endl
             << "------------ triple generation test ------------" << std::endl
             << std::endl;
   ;
 
-  test_ostriple(ios, party);
+  test_ostriple(&io, party);
 
-  for (int i = 0; i < threads; ++i) {
-    NetIO *raw = static_cast<NetIO *>(ios[i]->io);
-    delete ios[i];
-    delete raw;
-  }
   return 0;
 }

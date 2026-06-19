@@ -1,12 +1,10 @@
-#include "../../test/test_io_helpers.h"
 #include "emp-tool/emp-tool.h"
 #include <emp-zk/emp-zk.h>
 #include <iostream>
 using namespace emp;
 using namespace std;
 
-int port, party;
-const int threads = 1;
+int party;
 const int W = 64;   // bit width of each fed value
 
 // Build a valid authenticated f2k wire from a fresh ALICE-input value:
@@ -19,9 +17,9 @@ static F2kAuthValue make_wire(ZKBoolSession &sess, uint64_t v) {
   return out[0];
 }
 
-void test_f2k_mul(BoolIO *ios[threads], int party, int lg) {
+void test_f2k_mul(BoolIO *io, int party, int lg) {
   long long n = 1LL << lg;
-  ZKBoolSession sess(ios[0], party);
+  ZKBoolSession sess(io, party);
   auto *bb = &sess.engine();
 
   F2kAuthValue a = make_wire(sess, 2), b = make_wire(sess, 3);
@@ -45,13 +43,12 @@ void test_f2k_mul(BoolIO *ios[threads], int party, int lg) {
 }
 
 int main(int argc, char **argv) {
-  parse_party_and_port(argv, &party, &port);
-  BoolIO *ios[threads];
-  make_bool_ios(ios, party, port);
+  party = parse_party(argv);
+  auto netio = (party == ALICE) ? NetIO::listen(peer_port()) : NetIO::connect(peer_ip(), peer_port());
+  BoolIO io(netio.get(), party == ALICE);
 
-  int lg = (argc >= 4) ? atoi(argv[3]) : 22;
-  test_f2k_mul(ios, party, lg);
+  int lg = (argc >= 3) ? atoi(argv[2]) : 22;
+  test_f2k_mul(&io, party, lg);
 
-  destroy_bool_ios(ios);
   return 0;
 }

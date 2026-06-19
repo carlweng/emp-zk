@@ -1,19 +1,17 @@
-#include "../test_io_helpers.h"
 #include "emp-tool/emp-tool.h"
 #include "emp-zk/emp-zk.h"
 #include <iostream>
 using namespace emp;
 using namespace std;
 
-int port, party;
-const int threads = 1;
+int party;
 
 // ZKSet is the freshness primitive of the read/write RAM: the public range
 // {1, …, T}, with prove_member(v) proving v is in range. An in-range stream
 // must pass; a single out-of-range query must make the verifier abort
 // (Yang–Heath §4.2 / Remark 1).
-void test(BoolIO *ios[threads], int party, bool bad) {
-  ZKBoolSession sess(ios[0], party);
+void test(BoolIO *io, int party, bool bad) {
+  ZKBoolSession sess(io, party);
   int64_t T = 64;
   int elem_sz = (int)ramzk_bits_for(T);
 
@@ -34,13 +32,12 @@ void test(BoolIO *ios[threads], int party, bool bad) {
 }
 
 int main(int argc, char **argv) {
-  parse_party_and_port(argv, &party, &port);
-  BoolIO *ios[threads];
-  make_bool_ios(ios, party, port);
+  party = parse_party(argv);
+  auto netio = (party == ALICE) ? NetIO::listen(peer_port()) : NetIO::connect(peer_ip(), peer_port());
+  BoolIO io(netio.get(), party == ALICE);
 
-  bool bad = (argc >= 4 && string(argv[3]) == "bad");
-  test(ios, party, bad);
+  bool bad = (argc >= 3 && string(argv[2]) == "bad");
+  test(&io, party, bad);
 
-  destroy_bool_ios(ios);
   return 0;
 }

@@ -13,10 +13,9 @@
 using namespace emp;
 using namespace std;
 
-int port, party;
-const int threads = 1;
+int party;
 
-void test_circuit_zk(BoolIO *ios[threads], int party, int matrix_sz) {
+void test_circuit_zk(BoolIO *io, int party, int matrix_sz) {
   long long test_n = matrix_sz * matrix_sz;
 
   uint64_t *ar, *br, *cr;
@@ -39,7 +38,7 @@ void test_circuit_zk(BoolIO *ios[threads], int party, int matrix_sz) {
 
   auto start = clock_start();
 
-  setup_zk_arith(ios[0], party);
+  setup_zk_arith(io, party);
 
   IntFp *mat_a = new IntFp[test_n];
   IntFp *mat_b = new IntFp[test_n];
@@ -93,12 +92,9 @@ void test_circuit_zk(BoolIO *ios[threads], int party, int matrix_sz) {
 }
 
 int main(int argc, char **argv) {
-  parse_party_and_port(argv, &party, &port);
-  BoolIO *ios[threads];
-  for (int i = 0; i < threads; ++i)
-    ios[i] = new BoolIO(
-        new NetIO(party == ALICE ? nullptr : "127.0.0.1", port + i),
-        party == ALICE);
+  party = parse_party(argv);
+  auto netio = (party == ALICE) ? NetIO::listen(peer_port()) : NetIO::connect(peer_ip(), peer_port());
+  BoolIO io(netio.get(), party == ALICE);
 
   std::cout << std::endl
             << "------------ circuit zero-knowledge proof test ------------"
@@ -107,22 +103,17 @@ int main(int argc, char **argv) {
   ;
 
   int num = 0;
-  if (argc < 3) {
-    std::cout << "usage: bin/arith/matrix_mul_arith PARTY PORT DIMENSION"
+  if (argc < 2) {
+    std::cout << "usage: bin/arith/matrix_mul_arith PARTY DIMENSION"
               << std::endl;
     return -1;
-  } else if (argc == 3) {
+  } else if (argc == 2) {
     num = 10;
   } else {
-    num = atoi(argv[3]);
+    num = atoi(argv[2]);
   }
 
-  test_circuit_zk(ios, party, num);
+  test_circuit_zk(&io, party, num);
 
-  for (int i = 0; i < threads; ++i) {
-    NetIO *raw = static_cast<NetIO *>(ios[i]->io);
-    delete ios[i];
-    delete raw;
-  }
   return 0;
 }

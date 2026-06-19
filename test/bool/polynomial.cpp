@@ -1,21 +1,19 @@
-#include "../test_io_helpers.h"
 #include "emp-tool/emp-tool.h"
 #include <emp-zk/emp-zk.h>
 #include <iostream>
 using namespace emp;
 using namespace std;
 
-int port, party;
+int party;
 int sz, repeat;
-const int threads = 1;
 
-void test_polynomial(BoolIO *ios[threads], int party) {
+void test_polynomial(BoolIO *io, int party) {
   srand(time(NULL));
   bool *coeff = new bool[sz + 1];
   bool *witness = new bool[2 * sz];
   memset(witness, 0, 2 * sz * sizeof(bool));
 
-  ZKBoolSession sess(ios[0], party);
+  ZKBoolSession sess(io, party);
   sess.flush();
 
   ZKBit *x = new ZKBit[2 * sz];
@@ -30,11 +28,11 @@ void test_polynomial(BoolIO *ios[threads], int party) {
       sum = sum ^ (coeff[i + 1] & tmp);
     }
     coeff[0] = sum;
-    ios[0]->send_data(coeff, (sz + 1) * sizeof(bool));
+    io->send_data(coeff, (sz + 1) * sizeof(bool));
   } else {
-    ios[0]->recv_data(coeff, (sz + 1) * sizeof(bool));
+    io->recv_data(coeff, (sz + 1) * sizeof(bool));
   }
-  ios[0]->flush();
+  io->flush();
 
   for (int i = 0; i < 2 * sz; ++i)
     x[i] = sess.input<ZKBit>(ALICE, witness[i]);
@@ -58,29 +56,28 @@ void test_polynomial(BoolIO *ios[threads], int party) {
 }
 
 int main(int argc, char **argv) {
-  parse_party_and_port(argv, &party, &port);
-  BoolIO *ios[threads];
-  make_bool_ios(ios, party, port);
+  party = parse_party(argv);
+  auto netio = (party == ALICE) ? NetIO::listen(peer_port()) : NetIO::connect(peer_ip(), peer_port());
+  BoolIO io(netio.get(), party == ALICE);
 
   std::cout << std::endl << "------------ ";
   std::cout << "ZKP polynomial test";
   std::cout << " ------------" << std::endl << std::endl;
   ;
 
-  if (argc < 3) {
-    std::cout << "usage: [binary] PARTY PORT POLY_NUM POLY_DIMENSION"
+  if (argc < 2) {
+    std::cout << "usage: [binary] PARTY POLY_NUM POLY_DIMENSION"
               << std::endl;
     return -1;
-  } else if (argc < 5) {
+  } else if (argc < 4) {
     repeat = 100;
     sz = 10;
   } else {
-    repeat = atoi(argv[3]);
-    sz = atoi(argv[4]);
+    repeat = atoi(argv[2]);
+    sz = atoi(argv[3]);
   }
 
-  test_polynomial(ios, party);
+  test_polynomial(&io, party);
 
-  destroy_bool_ios(ios);
   return 0;
 }

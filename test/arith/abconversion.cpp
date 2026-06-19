@@ -5,17 +5,16 @@
 using namespace emp;
 using namespace std;
 
-int port, party;
-const int threads = 1;
+int party;
 
-void test_mix_circuit(BoolIO *ios[threads], int party, int sz) {
+void test_mix_circuit(BoolIO *io, int party, int sz) {
   srand(time(NULL));
   uint64_t *a = new uint64_t[sz];
   for (int i = 0; i < sz; ++i)
     a[i] = rand() % PR;
 
-  ZKBoolSession sess(ios[0], party);
-  setup_zk_arith(ios[0], party, sess);
+  ZKBoolSession sess(io, party);
+  setup_zk_arith(io, party, sess);
 
   IntFp *x = new IntFp[sz];
   batch_feed(x, a, sz);
@@ -78,12 +77,9 @@ void test_mix_circuit(BoolIO *ios[threads], int party, int sz) {
 }
 
 int main(int argc, char **argv) {
-  parse_party_and_port(argv, &party, &port);
-  BoolIO *ios[threads];
-  for (int i = 0; i < threads; ++i)
-    ios[i] = new BoolIO(
-        new NetIO(party == ALICE ? nullptr : "127.0.0.1", port + i),
-        party == ALICE);
+  party = parse_party(argv);
+  auto netio = (party == ALICE) ? NetIO::listen(peer_port()) : NetIO::connect(peer_ip(), peer_port());
+  BoolIO io(netio.get(), party == ALICE);
 
   std::cout << std::endl
             << "------------ circuit zero-knowledge proof test ------------"
@@ -92,22 +88,17 @@ int main(int argc, char **argv) {
   ;
 
   int num = 0;
-  if (argc < 3) {
-    std::cout << "usage: bin/arith/abconversion PARTY PORT TEST_SIZE"
+  if (argc < 2) {
+    std::cout << "usage: bin/arith/abconversion PARTY TEST_SIZE"
               << std::endl;
     return -1;
-  } else if (argc == 3) {
+  } else if (argc == 2) {
     num = 10;
   } else {
-    num = atoi(argv[3]);
+    num = atoi(argv[2]);
   }
 
-  test_mix_circuit(ios, party, num);
+  test_mix_circuit(&io, party, num);
 
-  for (int i = 0; i < threads; ++i) {
-    NetIO *raw = static_cast<NetIO *>(ios[i]->io);
-    delete ios[i];
-    delete raw;
-  }
   return 0;
 }

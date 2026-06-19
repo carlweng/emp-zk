@@ -1,17 +1,15 @@
-#include "../test_io_helpers.h"
 #include "emp-tool/emp-tool.h"
 #include <emp-zk/emp-zk.h>
 #include <iostream>
 using namespace emp;
 using namespace std;
 
-int port, party;
-const int threads = 1;
+int party;
 
-using Int32 = Int_T<ZKBoolContext, 32>;   // signed, fixed width: a WireValue
+using Int32 = Int_T<ZKBoolSession::ctx_t, 32>;   // signed, fixed width: a WireValue
 
-void test_circuit_zk(BoolIO *ios[threads], int party) {
-  ZKBoolSession sess(ios[0], party);
+void test_circuit_zk(BoolIO *io, int party) {
+  ZKBoolSession sess(io, party);
   Int32 a = sess.input<Int32>(ALICE, 3);
   Int32 b = sess.input<Int32>(ALICE, 2);
   cout << sess.reveal(a - b, PUBLIC).value_or(0) << endl;
@@ -20,12 +18,11 @@ void test_circuit_zk(BoolIO *ios[threads], int party) {
 }
 
 int main(int argc, char **argv) {
-  parse_party_and_port(argv, &party, &port);
-  BoolIO *ios[threads];
-  make_bool_ios(ios, party, port);
+  party = parse_party(argv);
+  auto netio = (party == ALICE) ? NetIO::listen(peer_port()) : NetIO::connect(peer_ip(), peer_port());
+  BoolIO io(netio.get(), party == ALICE);
 
-  test_circuit_zk(ios, party);
+  test_circuit_zk(&io, party);
 
-  destroy_bool_ios(ios);
   return 0;
 }

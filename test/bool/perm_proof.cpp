@@ -1,4 +1,3 @@
-#include "../test_io_helpers.h"
 #include "emp-tool/emp-tool.h"
 #include <emp-zk/emp-zk.h>
 #include <iostream>
@@ -6,8 +5,7 @@
 using namespace emp;
 using namespace std;
 
-int port, party;
-const int threads = 1;
+int party;
 const int W = 64;   // bit width of each fed value
 
 // Build a valid authenticated f2k wire from a fresh ALICE-input value: feed W
@@ -23,9 +21,9 @@ static F2kAuthValue make_wire(ZKBoolSession &sess, uint64_t v) {
 // n elements, each `m` wires (payload = m*128 bits). A is the natural order;
 // B is the same elements in reversed order (a permutation). `bad` corrupts
 // one wire of B so the multiset no longer matches.
-void test_perm(BoolIO *ios[threads], int party, int n, int bits,
+void test_perm(BoolIO *io, int party, int n, int bits,
                const string &mode) {
-  ZKBoolSession sess(ios[0], party);
+  ZKBoolSession sess(io, party);
   const int m = (bits + 127) / 128;
   const bool bad = (mode == "bad");
   // "periodic" exercises explicit per-batch compress(): each fold draws its
@@ -65,15 +63,14 @@ void test_perm(BoolIO *ios[threads], int party, int n, int bits,
 }
 
 int main(int argc, char **argv) {
-  parse_party_and_port(argv, &party, &port);
-  BoolIO *ios[threads];
-  make_bool_ios(ios, party, port);
+  party = parse_party(argv);
+  auto netio = (party == ALICE) ? NetIO::listen(peer_port()) : NetIO::connect(peer_ip(), peer_port());
+  BoolIO io(netio.get(), party == ALICE);
 
-  int n = (argc >= 4) ? atoi(argv[3]) : 100000;
-  int bits = (argc >= 5) ? atoi(argv[4]) : 128;
-  string mode = (argc >= 6) ? string(argv[5]) : "";   // "", "periodic", "bad"
-  test_perm(ios, party, n, bits, mode);
+  int n = (argc >= 3) ? atoi(argv[2]) : 100000;
+  int bits = (argc >= 4) ? atoi(argv[3]) : 128;
+  string mode = (argc >= 5) ? string(argv[4]) : "";   // "", "periodic", "bad"
+  test_perm(&io, party, n, bits, mode);
 
-  destroy_bool_ios(ios);
   return 0;
 }

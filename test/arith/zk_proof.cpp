@@ -1,18 +1,18 @@
 #include "emp-tool/emp-tool.h"
+#include <emp-zk/emp-zk.h>
 #include "emp-zk/emp-zk-arith/emp-zk-arith.h"
 #include <iostream>
 using namespace emp;
 using namespace std;
 
-int port, party;
-const int threads = 1;
+int party;
 
-void test_circuit_zk(BoolIO *ios[threads], int party) {
+void test_circuit_zk(BoolIO *io, int party) {
   int test_n = 1024 * 64;
 
   std::cout << "performance test" << std::endl;
   auto start = clock_start();
-  setup_zk_arith(ios[0], party);
+  setup_zk_arith(io, party);
   auto timesetup = time_from(start);
   cout << "\tsetup: " << timesetup * 1000 << " " << party << " " << endl;
 
@@ -90,24 +90,16 @@ void test_circuit_zk(BoolIO *ios[threads], int party) {
 }
 
 int main(int argc, char **argv) {
-  parse_party_and_port(argv, &party, &port);
-  BoolIO *ios[threads];
-  for (int i = 0; i < threads; ++i)
-    ios[i] = new BoolIO(
-        new NetIO(party == ALICE ? nullptr : "127.0.0.1", port + i),
-        party == ALICE);
+  party = parse_party(argv);
+  auto netio = (party == ALICE) ? NetIO::listen(peer_port()) : NetIO::connect(peer_ip(), peer_port());
+  BoolIO io(netio.get(), party == ALICE);
 
   std::cout << std::endl
             << "------------ circuit zero-knowledge proof test ------------"
             << std::endl
             << std::endl;
 
-  test_circuit_zk(ios, party);
+  test_circuit_zk(&io, party);
 
-  for (int i = 0; i < threads; ++i) {
-    NetIO *raw = static_cast<NetIO *>(ios[i]->io);
-    delete ios[i];
-    delete raw;
-  }
   return 0;
 }

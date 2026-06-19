@@ -1,20 +1,18 @@
-#include "../../test/test_io_helpers.h"
 #include "emp-tool/emp-tool.h"
 #include <emp-zk/emp-zk.h>
 #include <iostream>
 using namespace emp;
 using namespace std;
 
-int port, party;
-const int threads = 1;
-using Int32 = Int_T<ZKBoolContext, 32>;   // signed, fixed width: a WireValue
+int party;
+using Int32 = Int_T<ZKBoolSession::ctx_t, 32>;   // signed, fixed width: a WireValue
 
-void test_circuit_zk(BoolIO *ios[threads], int party, int log_trial) {
+void test_circuit_zk(BoolIO *io, int party, int log_trial) {
 
   long long input_sz = 1 << log_trial;
   if (input_sz < 100000000LL) {
     auto start = clock_start();
-    ZKBoolSession sess(ios[0], party);
+    ZKBoolSession sess(io, party);
     Int32 *a = new Int32[input_sz / 32];
     for (int i = 0; i < input_sz / 32; ++i)
       a[i] = sess.input<Int32>(ALICE, i);
@@ -27,7 +25,7 @@ void test_circuit_zk(BoolIO *ios[threads], int party, int log_trial) {
   } else {
     long long unit = 1 << 24;
     auto start = clock_start();
-    ZKBoolSession sess(ios[0], party);
+    ZKBoolSession sess(io, party);
     int round = input_sz / unit;
     Int32 **a = (Int32 **)malloc(round * sizeof(Int32 *));
     for (int i = 0; i < round; ++i) {
@@ -46,9 +44,9 @@ void test_circuit_zk(BoolIO *ios[threads], int party, int log_trial) {
 }
 
 int main(int argc, char **argv) {
-  parse_party_and_port(argv, &party, &port);
-  BoolIO *ios[threads];
-  make_bool_ios(ios, party, port);
+  party = parse_party(argv);
+  auto netio = (party == ALICE) ? NetIO::listen(peer_port()) : NetIO::connect(peer_ip(), peer_port());
+  BoolIO io(netio.get(), party == ALICE);
 
   std::cout << std::endl
             << "------------ circuit zero-knowledge proof test ------------"
@@ -57,19 +55,18 @@ int main(int argc, char **argv) {
   ;
 
   int num = 0;
-  if (argc < 3) {
+  if (argc < 2) {
     std::cout
-        << "usage: bin/bool/input_scalability_bool PARTY PORT LOG(INPUT_SZ)"
+        << "usage: bin/bool/input_scalability_bool PARTY LOG(INPUT_SZ)"
         << std::endl;
     return -1;
-  } else if (argc == 3) {
+  } else if (argc == 2) {
     num = 18;
   } else {
-    num = atoi(argv[3]);
+    num = atoi(argv[2]);
   }
 
-  test_circuit_zk(ios, party, num);
+  test_circuit_zk(&io, party, num);
 
-  destroy_bool_ios(ios);
   return 0;
 }

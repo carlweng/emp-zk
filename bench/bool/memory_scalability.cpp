@@ -4,7 +4,6 @@
 // replay streams gates through the session rather than materializing the whole
 // circuit. C++20.
 
-#include "../../test/test_io_helpers.h"
 #include "emp-tool/emp-tool.h"
 #include "emp-tool/ir/context/clear.h"
 #include "emp-tool/ir/builtins.h"
@@ -20,8 +19,7 @@
 
 using namespace emp;
 
-int port, party;
-const int threads = 1;
+int party;
 
 static long peak_rss_kib() {
 #if defined(__linux__) || defined(__APPLE__)
@@ -38,14 +36,14 @@ static long peak_rss_kib() {
 }
 
 int main(int argc, char **argv) {
-  parse_party_and_port(argv, &party, &port);
-  int K = (argc >= 4) ? atoi(argv[3]) : 8;   // number of replays
+  party = parse_party(argv);
+  int K = (argc >= 3) ? atoi(argv[2]) : 8;   // number of replays
 
-  BoolIO *ios[threads];
-  make_bool_ios(ios, party, port);
+  auto netio = (party == ALICE) ? NetIO::listen(peer_port()) : NetIO::connect(peer_ip(), peer_port());
+  BoolIO io(netio.get(), party == ALICE);
 
-  ZKBoolSession sess(ios[0], party);
-  ZKBoolContext &ctx = sess.ctx();
+  ZKBoolSession sess(&io, party);
+  ZKBoolSession::ctx_t &ctx = sess.ctx();
   const circuit::BooleanProgram &prog = circuit::builtin_circuit("sha256_256");
   const int nin = (int)prog.num_inputs;
 
@@ -80,6 +78,5 @@ int main(int argc, char **argv) {
     printf("ZK sha256_256 x%d replays: %.1f ms, %.2f ms/replay, peakRSS %ld MiB, "
            "wrong=%d\n", K, t / 1000.0, t / 1000.0 / K, peak_rss_kib() / 1024, wrong);
 
-  destroy_bool_ios(ios);
   return wrong ? 1 : 0;
 }

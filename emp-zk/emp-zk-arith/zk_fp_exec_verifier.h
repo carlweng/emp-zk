@@ -12,12 +12,6 @@ public:
   __uint128_t delta;
 
   ZKFpExecVer(BoolIO *io) : ZKFpExec() {
-    // pub_mac is a public domain-separation tag derived from fixed-key
-    // AES — the output is known to both parties by design. Prover and
-    // verifier use the same PRP key (PRP(0)) so the tags match.
-    *(block *)&this->pub_mac = zero_block;
-    PRP(zero_block).permute_block((block *)&this->pub_mac, 1);
-    this->pub_mac = mod(this->pub_mac & (__uint128_t)0xFFFFFFFFFFFFFFFFULL, pr);
     this->io = io;
     this->ostriple = new FpOSTriple(BOB, io);
     this->delta = this->ostriple->delta;

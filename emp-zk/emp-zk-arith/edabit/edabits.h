@@ -72,7 +72,9 @@ public:
 
     int_boo_pr = zk.input<ZKInt>(PUBLIC, PR, 62);
     int_boo_zero = zk.input<ZKInt>(PUBLIC, 0, 62);
-    int_boo_pr_plus_two = zk.input<ZKInt>(PUBLIC, PR + 2, 62); // TODO why????
+    // Negative-value correction added in the f2 overflow check below
+    // (the `+ int_boo_pr_plus_two` select); the +2 vs PR is specific to that path.
+    int_boo_pr_plus_two = zk.input<ZKInt>(PUBLIC, PR + 2, 62);
   }
 
   ~EdaBits() {

@@ -16,7 +16,14 @@ public:
 
   static ZKFpExec *zk_exec;
 
-  ZKFpExec() {}
+  ZKFpExec() {
+    // pub_mac is a public domain-separation tag from fixed-key PRP(0), reduced
+    // into F_p. Prover and verifier use the same key so the tags match; it is
+    // party-agnostic, so it is derived once here on the base.
+    *(block *)&pub_mac = zero_block;
+    PRP(zero_block).permute_block((block *)&pub_mac, 1);
+    pub_mac = mod(pub_mac & (__uint128_t)0xFFFFFFFFFFFFFFFFULL, pr);
+  }
   virtual ~ZKFpExec() {}
 
   virtual void feed(__uint128_t &label, const uint64_t &value) = 0;

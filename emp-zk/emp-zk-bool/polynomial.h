@@ -3,6 +3,7 @@
 
 #include "emp-ot/emp-ot.h"
 #include "emp-tool/emp-tool.h"
+#include <functional>
 
 namespace emp {
 using namespace std;
@@ -24,12 +25,17 @@ public:
   int64_t num;
   GaloisFieldPacking pack;
   Ferret *ferret = nullptr;
+  // COT source. Defaults to the ferret stream (standalone use); the bool
+  // engine overrides it to share its threaded FIFO prefetch buffer so the one
+  // COT stream stays ordered across all consumers.
+  std::function<void(block *, int64_t)> draw_cot;
 
   PolyProof(int party, IOChannel *io, Ferret *ferret)
       : party(party), io(io), delta(ferret->Delta), ferret(ferret), num(0) {
     buffer.resize(buffer_sz);
     if (party == ALICE)
       buffer1.resize(buffer_sz);
+    draw_cot = [this](block *o, int64_t n) { this->ferret->next_n(o, n); };
   }
 
   ~PolyProof() { batch_check(); }
@@ -49,7 +55,7 @@ public:
 
       vector_inn_prdt_sum_red(check_sum, chi.data(), buffer.data(), num);
       vector_inn_prdt_sum_red(check_sum + 1, chi.data(), buffer1.data(), num);
-      ferret->next_n(ope_data, 128);
+      draw_cot(ope_data, 128);
       block tmp;
       pack.packing(&tmp, ope_data);
       uint64_t choice_bits[2];
@@ -75,7 +81,7 @@ public:
       uni_hash_coeff_gen(chi.data(), seed, num > 4 ? num : 4);
       block B;
       vector_inn_prdt_sum_red(&B, chi.data(), buffer.data(), num);
-      ferret->next_n(ope_data, 128);
+      draw_cot(ope_data, 128);
       block tmp;
       pack.packing(&tmp, ope_data);
 

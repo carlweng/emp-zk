@@ -76,16 +76,59 @@ void test_compute_and_gate_check(FpOSTriple *os) {
   delete[] c;
 }
 
-void test_ostriple(BoolIO *io, int party) {
+// Vectorized multiply: build `len` independent input pairs, run the batched
+// auth_compute_mul (one call, batched send, threaded compute), verify triples.
+void test_vectorized_mul(FpOSTriple *os, int64_t len) {
+  __uint128_t *a = new __uint128_t[len];
+  __uint128_t *b = new __uint128_t[len];
+  __uint128_t *c = new __uint128_t[len];
+  if (party == ALICE) {
+    __uint128_t *ain = new __uint128_t[len];
+    __uint128_t *bin = new __uint128_t[len];
+    PRG prg;
+    prg.random_block((block *)ain, len);
+    prg.random_block((block *)bin, len);
+    for (int64_t i = 0; i < len; ++i) {
+      ain[i] = mod(ain[i] & (__uint128_t)0xFFFFFFFFFFFFFFFFLL, pr);
+      a[i] = os->authenticated_val_input(ain[i]);
+      bin[i] = mod(bin[i] & (__uint128_t)0xFFFFFFFFFFFFFFFFLL, pr);
+      b[i] = os->authenticated_val_input(bin[i]);
+    }
+    auto start = clock_start();                         // time the mul only
+    os->auth_compute_mul_send(c, a, b, len);            // batched + threaded
+    std::cout << "vectorized mul sender time: " << time_from(start) << std::endl;
+    os->check_compute_mul(a, b, c, len);
+    delete[] ain;
+    delete[] bin;
+  } else {
+    for (int64_t i = 0; i < len; ++i) {
+      a[i] = os->authenticated_val_input();
+      b[i] = os->authenticated_val_input();
+    }
+    auto start = clock_start();                         // time the mul only
+    os->auth_compute_mul_recv(c, a, b, len);            // batched + threaded
+    std::cout << "vectorized mul recver time: " << time_from(start) << std::endl;
+    os->check_compute_mul(a, b, c, len);
+  }
+  delete[] a;
+  delete[] b;
+  delete[] c;
+}
+
+void test_ostriple(BoolIO *io, int party, int threads) {
   auto t1 = clock_start();
-  FpOSTriple os(party, io);
+  FpOSTriple os(party, io, threads);
   cout << party << "\tconstructor\t" << time_from(t1) << " us" << endl;
 
   test_auth_bit_input(&os);
   std::cout << "check for authenticated bit input\n";
 
   test_compute_and_gate_check(&os);
-  std::cout << "check for multiplication\n";
+  std::cout << "check for multiplication (scalar)\n";
+
+  test_vectorized_mul(&os, 1 << 20);
+  std::cout << "check for multiplication (vectorized, threads=" << threads
+            << ")\n";
 
   std::cout << std::endl;
 }
@@ -100,7 +143,8 @@ int main(int argc, char **argv) {
             << std::endl;
   ;
 
-  test_ostriple(&io, party);
+  int threads = (argc > 3) ? std::max(1, atoi(argv[3])) : 1;
+  test_ostriple(&io, party, threads);
 
   return 0;
 }

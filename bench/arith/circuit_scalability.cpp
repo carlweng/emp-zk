@@ -7,11 +7,13 @@ using namespace std;
 int party;
 
 void test_circuit_zk(BoolIO *io, int party,
-                     int input_sz_lg) {
+                     int input_sz_lg, int threads) {
 
   long long test_n = 1 << input_sz_lg;
   auto start = clock_start();
-  setup_zk_arith(io, party);
+  // Prepay the whole proof's VOLE (~one per multiplication + inputs/checks),
+  // so the threaded produce runs wire-free with no mid-proof rollovers.
+  setup_zk_arith(io, party, threads, test_n + (1 << 20));
   auto timesetup = time_from(start);
   cout << "time for setup: " << timesetup * 1000 << " " << party << " " << endl;
 
@@ -61,15 +63,16 @@ int main(int argc, char **argv) {
 
   int num = 0;
   if (argc < 2) {
-    std::cout << "usage: [binary] PARTY LOG(NUM_GATES)" << std::endl;
+    std::cout << "usage: [binary] PARTY LOG(NUM_GATES) [THREADS]" << std::endl;
     return -1;
   } else if (argc == 2) {
     num = 16;
   } else {
     num = atoi(argv[2]);
   }
+  int threads = (argc > 3) ? std::max(1, atoi(argv[3])) : 1;
 
-  test_circuit_zk(&io, party, num);
+  test_circuit_zk(&io, party, num, threads);
 
   return 0;
 }

@@ -15,8 +15,8 @@ public:
   // specific because NOT folds it on the wire.
   block zdelta;
 
-  ZKBoolVerifier(BoolIO *io, int64_t expected_cots = 0)
-      : ZKBoolBase(BOB, io, expected_cots) {
+  ZKBoolVerifier(BoolIO *io, int64_t expected_cots = 0, int n_threads = 1)
+      : ZKBoolBase(BOB, io, expected_cots, n_threads) {
     zdelta = delta ^ makeBlock(0, 1);
     // PUBLIC label for bit 1: xor zdelta in so the wire MAC is right
     // even though there's no cleartext flip.
@@ -77,7 +77,7 @@ private:
   // Authenticated-bit input: receive the prover's masking flips, fold them
   // into the COT keys to recover the per-bit MAC structure.
   void authenticated_bits_input(block *auth, const bool *in, int64_t len) {
-    ferret->next_n(auth, len);
+    draw_cot_(auth, len);
     for (int64_t i = 0; i < len; ++i) {
       bool buff = io->recv_bit();
       auth[i] = clear_lsb(xor_delta_if(auth[i], buff));
@@ -95,8 +95,7 @@ private:
       check_cnt = 0;
     }
 
-    block auth;
-    ferret->next_n(&auth, 1);                     // fresh COT from the stream
+    block auth = draw_one_cot_();                 // fresh COT (threaded prefetch)
     andgate_left_buffer[check_cnt]  = a;
     andgate_right_buffer[check_cnt] = b;
 
@@ -123,18 +122,20 @@ private:
 
   // ---- Per-thread + aggregation hooks (called from base skeleton) -------
 
-  void andgate_correctness_check(block *ret, int64_t task_n,
-                                 block chi_seed) override {
+  void andgate_correctness_check(block *ret, int thr_idx, int64_t start,
+                                 int64_t task_n, block chi_seed) override {
+    ret[2 * thr_idx] = zero_block;
     if (task_n == 0) return;
     const block *left    = andgate_left_buffer.data();
     const block *right   = andgate_right_buffer.data();
     const block *gateout = andgate_out_buffer.data();
 
-    // Chunked fold (mirror of the prover): per cache-resident chunk form
-    // B = left*right + gateout*delta, accumulate the unreduced 256-bit chi
-    // inner product across chunks, and reduce once at the end. Avoids the
-    // multi-MB buffer rewrite and a task_n-sized chi array.
+    // Chunked fold (mirror of the prover) over [start, start+task_n): per chunk
+    // form B = left*right + gateout*delta, accumulate the unreduced 256-bit chi
+    // inner product, reduce once at the end. PRG seeked to `start` so each
+    // worker's chi slice matches the serial stream; result written to ret[2t].
     PRG prg(&chi_seed);
+    prg.seek((uint64_t)start);
     constexpr int64_t kChunk = 1024;
     block chi[kChunk], B[kChunk];
     block acc[2] = {zero_block, zero_block};
@@ -143,20 +144,20 @@ private:
       prg.random_block(chi, m);
       for (int64_t i = 0; i < m; ++i) {
         block bb, tmp;
-        gfmul(left[base + i], right[base + i], &bb);
-        gfmul(gateout[base + i], delta, &tmp);
+        gfmul(left[start + base + i], right[start + base + i], &bb);
+        gfmul(gateout[start + base + i], delta, &tmp);
         B[i] = bb ^ tmp;
       }
       block p[2];
       vector_inn_prdt_sum_no_red(p, chi, B, m);
       acc[0] = acc[0] ^ p[0];  acc[1] = acc[1] ^ p[1];
     }
-    ret[0] = reduce(acc[0], acc[1]);
+    ret[2 * thr_idx] = reduce(acc[0], acc[1]);
   }
 
   void andgate_correctness_aggregate(block *sum) override {
     block ope_data[128];
-    ferret->next_n(ope_data, 128);
+    draw_cot_(ope_data, 128);
     block B_star;
     pack.packing(&B_star, ope_data);
     B_star = B_star ^ sum[0];
@@ -216,7 +217,7 @@ private:
     f2k_check(sum, f2k_check_cnt, seed);
 
     block ope_data[128];
-    ferret->next_n(ope_data, 128);
+    draw_cot_(ope_data, 128);
     block B_star;
     pack.packing(&B_star, ope_data);
     B_star = B_star ^ sum[0];

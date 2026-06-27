@@ -11,9 +11,10 @@ public:
   BoolIO *io = nullptr;
   __uint128_t delta;
 
-  ZKFpExecVer(BoolIO *io) : ZKFpExec() {
+  ZKFpExecVer(BoolIO *io, int threads = 1, int64_t expected_vole = 0)
+      : ZKFpExec() {
     this->io = io;
-    this->ostriple = new FpOSTriple(BOB, io);
+    this->ostriple = new FpOSTriple(BOB, io, threads, expected_vole);
     this->delta = this->ostriple->delta;
   }
 
@@ -56,9 +57,30 @@ public:
     return ((__uint128_t)mac) << 64;
   }
 
+  __uint128_t sub_gate(const __uint128_t &a, const __uint128_t &b) {
+    // a - b = a + (PR - b) on the key share; val lane stays 0.
+    uint64_t mac_a = (uint64_t)(a >> 64);
+    uint64_t mac_b = (uint64_t)(b >> 64);
+    uint64_t mac = add_mod(mac_a, PR - mac_b);
+    return ((__uint128_t)mac) << 64;
+  }
+
+  __uint128_t neg_gate(const __uint128_t &a) {
+    // -a = PR - key on the key share; val lane stays 0.
+    uint64_t k = (uint64_t)(a >> 64);
+    uint64_t mac = (k == 0) ? 0 : (PR - k);
+    return ((__uint128_t)mac) << 64;
+  }
+
   __uint128_t mul_gate(const __uint128_t &a, const __uint128_t &b) {
     ++this->gid;
     return ostriple->auth_compute_mul_recv(a, b);
+  }
+
+  void mul_gate(__uint128_t *out, const __uint128_t *a, const __uint128_t *b,
+                int64_t len) {
+    this->gid += len;
+    ostriple->auth_compute_mul_recv(out, a, b, len);
   }
 
   __uint128_t mul_const_gate(const __uint128_t &a, const uint64_t &b) {

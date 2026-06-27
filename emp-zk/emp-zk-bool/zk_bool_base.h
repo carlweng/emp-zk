@@ -28,7 +28,9 @@
 #include "emp-zk/emp-zk-bool/zk_wire.h"
 #include "emp-zk/emp-zk-bool/bool_io.h"
 #include "emp-zk/emp-zk-bool/polynomial.h"
+#include <future>
 #include <memory>
+#include <vector>
 
 namespace emp {
 using namespace std;
@@ -88,6 +90,51 @@ public:
   SilentFerret *ferret = nullptr;
   PolyProof  *polyproof = nullptr;
 
+  // Worker count + pool for the parallel paths: SilentFerret's begin-time
+  // expansion, the f2k VOLE, and the AND-gate batch check. 1 = single-threaded
+  // (pool_ null), wire-identical to the prior path.
+  int n_threads_ = 1;
+  ThreadPool *pool_ = nullptr;
+
+  // ---- Optional phase profiling (EMP_PROFILE=1), printed at teardown ----
+  double prof_ferret_begin_us = 0.0;  // SilentFerret begin() prepay (COT setup)
+  double prof_check_us = 0.0;         // andgate batch correctness checks
+
+  // ---- Threaded COT prefetch (the bool analogue of arith's fill_vole_) ----
+  // Every COT the engine consumes (gates, inputs, OPE checks, PolyProof) is
+  // served FIFO from this buffer, which refills in bulk via the SilentFerret
+  // wire-free *threaded* produce (next_chunks_parallel) instead of the serial
+  // per-gate next_n(). Because it serves the same deterministic COT stream in
+  // the same order, consumption is byte-identical to the old per-gate path
+  // (at n_threads_==1 produce is the same serial next(); at >1 produce_range
+  // yields the same COTs), so the wire transcript is unchanged.
+  std::vector<block> cot_buf_;
+  int64_t cot_pos_ = 0, cot_have_ = 0;
+
+  // One fresh COT (hot path: one per AND gate).
+  block draw_one_cot_() {
+    if (cot_pos_ == cot_have_) cot_refill_();
+    return cot_buf_[cot_pos_++];
+  }
+  // n fresh COTs, FIFO from the same stream (inputs / OPE / PolyProof).
+  void draw_cot_(block *out, int64_t n) {
+    int64_t done = 0;
+    while (done < n) {
+      if (cot_pos_ == cot_have_) cot_refill_();
+      const int64_t take = std::min(n - done, cot_have_ - cot_pos_);
+      memcpy(out + done, cot_buf_.data() + cot_pos_, (size_t)take * sizeof(block));
+      cot_pos_ += take;
+      done += take;
+    }
+  }
+  void cot_refill_() {
+    const int64_t chunk = ferret->chunk_size();
+    const int64_t nch = (int64_t)cot_buf_.size() / chunk;
+    ferret->next_chunks_parallel(cot_buf_.data(), nch, n_threads_);
+    cot_pos_ = 0;
+    cot_have_ = nch * chunk;
+  }
+
   // Output-MAC accumulator. Hash + scratch buffer; finalize at teardown.
   Hash auth_hash;
   vector<block> auth_tmp;
@@ -100,20 +147,29 @@ public:
   // whole proof's COT consumption is wire-free. 0 (the default) uses the
   // per-round streaming begin() — safe for an unknown circuit size, at the cost
   // of one COT-correction burst per ~15M-COT round.
-  ZKBoolBase(int p, BoolIO *io_, int64_t expected_cots = 0)
-      : party(p), io(io_) {
+  ZKBoolBase(int p, BoolIO *io_, int64_t expected_cots = 0, int n_threads = 1)
+      : party(p), io(io_), n_threads_(n_threads < 1 ? 1 : n_threads) {
+    if (n_threads_ > 1) pool_ = new ThreadPool((size_t)n_threads_);
     // BoolIO inherits IOChannel publicly with the IOChannel subobject at
     // offset 0, so the cast is a no-op at runtime. Ferret now takes a
     // single IOChannel (post-unification with the other OT extensions).
+    // n_threads sizes SilentFerret's begin()-time expansion pool.
     IOChannel *iochan = reinterpret_cast<IOChannel *>(io_);
-    ferret = new SilentFerret(3 - p, iochan, /*malicious=*/true);
+    ferret = new SilentFerret(3 - p, iochan, /*malicious=*/true,
+                              tuning::ferret_b13, nullptr, n_threads_);
     delta = ferret->Delta;           // Δ sampled in Ferret's ctor
     // One persistent SilentFerret streaming session for the whole proof. COTs
     // are drawn lazily, one per AND gate, straight from the streaming interface
     // (its leftover buffer); no separate pre-drawn COT pool is kept. Closed in
     // the destructor.
+    auto _tferret = clock_start();
     if (expected_cots > 0) ferret->begin(expected_cots);
     else                   ferret->begin();
+    prof_ferret_begin_us += time_from(_tferret);
+
+    // Threaded COT prefetch buffer (gap #3): 128 chunks (~1M COTs) per refill,
+    // produced wire-free across n_threads_ via SilentFerret::next_chunks_parallel.
+    cot_buf_.resize((size_t)(128 * ferret->chunk_size()));
 
     // Buffers for the QuickSilver AND-gate batch check (left/right inputs +
     // output MAC, folded once per CHECK_SZ gates with an FS-derived chi). The
@@ -135,6 +191,10 @@ public:
     pub_label[1] = clear_lsb(pub_label[1]);
 
     polyproof = new PolyProof(p, io_, ferret);
+    // Route PolyProof's COT draws through the same FIFO buffer so the single
+    // shared COT stream stays in order (otherwise its next_n would desync the
+    // cursor the prefetch buffer has already advanced).
+    polyproof->draw_cot = [this](block *o, int64_t n) { draw_cot_(o, n); };
   }
 
   virtual ~ZKBoolBase() {
@@ -146,6 +206,12 @@ public:
     // the live vtable and the open Ferret session — so here we only
     // free. delete nullptr is a no-op when f2k was unused.
     delete f2k_vole;
+    delete pool_;
+    if (getenv("EMP_PROFILE")) {
+      fprintf(stderr,
+              "[bool-prof p%d] ferret_begin=%.1fms andgate_check=%.1fms\n",
+              party, prof_ferret_begin_us / 1000.0, prof_check_us / 1000.0);
+    }
   }
 
   // ---- Helper bit ops -------------------------------------------------
@@ -197,20 +263,50 @@ public:
   // hands off to the role-specific aggregator that does the network
   // exchange + compare. Fires once per CHECK_SZ buffered ANDs.
   void andgate_correctness_check_manage() {
+    auto _tprof = clock_start();
     io->flush();
     block seed = io->io->get_digest();
-    // ALICE writes (A0, A1) into sum[0..1]; BOB writes B into sum[0].
-    block sum[2] = { zero_block, zero_block };
-    andgate_correctness_check(sum, check_cnt, seed);
-    andgate_correctness_aggregate(sum);
+    const int T = n_threads_;
+    // Per-worker partials: ALICE (A0_t, A1_t) at sum[2t..2t+1]; BOB B_t at
+    // sum[2t]. GF(2^128) reduce is linear over XOR, so XOR-combining the
+    // per-range reduced partials is bit-identical to one serial pass.
+    std::vector<block> sum(2 * (size_t)T, zero_block);
+    if (T <= 1 || pool_ == nullptr) {
+      andgate_correctness_check(sum.data(), 0, 0, check_cnt, seed);
+    } else {
+      const int64_t task_base = check_cnt / T;
+      block *sum_ptr = sum.data();
+      std::vector<std::future<void>> fut;
+      int64_t start = 0;
+      for (int t = 0; t < T - 1; ++t) {
+        const int64_t s = start;
+        const int idx = t;
+        fut.push_back(pool_->enqueue([this, sum_ptr, idx, s, task_base, seed]() {
+          andgate_correctness_check(sum_ptr, idx, s, task_base, seed);
+        }));
+        start += task_base;
+      }
+      andgate_correctness_check(sum.data(), T - 1, start, check_cnt - start,
+                                seed);
+      for (auto &f : fut) f.get();
+    }
+    block agg[2] = {zero_block, zero_block};
+    for (int t = 0; t < T; ++t) {
+      agg[0] = agg[0] ^ sum[2 * t];
+      agg[1] = agg[1] ^ sum[2 * t + 1];
+    }
+    andgate_correctness_aggregate(agg);
     io->flush();
+    prof_check_us += time_from(_tprof);
   }
 
-  // Reduction over the buffered triples. ALICE writes the (Δ⁰, Δ¹)
-  // coefficients into ret[0..1]; BOB writes its check polynomial into
-  // ret[0].
-  virtual void andgate_correctness_check(block *ret, int64_t task_n,
-                                         block chi_seed) = 0;
+  // Reduction over the buffered triples [start, start+task_n). ALICE writes the
+  // (Δ⁰, Δ¹) coefficients into ret[2*thr_idx .. 2*thr_idx+1]; BOB writes its
+  // check polynomial into ret[2*thr_idx]. Each worker re-derives its chi slice
+  // by seeking PRG(chi_seed) to `start`, so the split is bit-identical to a
+  // single serial pass.
+  virtual void andgate_correctness_check(block *ret, int thr_idx, int64_t start,
+                                         int64_t task_n, block chi_seed) = 0;
 
   // Trailing role-specific aggregation: ALICE packs + sends `A_star`,
   // BOB receives and verifies with cmpBlock.
@@ -229,8 +325,11 @@ public:
   // own inner Ferret keeps its wire bytes separate from the bit Ferret.
   void f2k_init() {
     if (f2k_ready) return;
-    f2k_vole = new F2kVOLE<AuthValueF2k>(party, io, /*malicious=*/true,
-                                         tuning::ferret_b10);
+    // SilentF2kVOLE is-a F2kVOLE (Svole base); the n_threads pool threads its
+    // begin-time expansion. run()/set_delta dispatch virtually through the base
+    // pointer, so the swap is transparent to the rest of the f2k machinery.
+    f2k_vole = new SilentF2kVOLE<AuthValueF2k>(party, io, /*malicious=*/true,
+                                               tuning::ferret_b10, n_threads_);
     if (party == BOB) f2k_vole->set_delta(ferret->Delta);
     f2k_buffer_sz = f2k_vole->chunk_aligned_buf_sz();
     f2k_auth_buffer.resize(f2k_buffer_sz);

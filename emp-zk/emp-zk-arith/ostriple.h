@@ -3,6 +3,9 @@
 
 #include "emp-ot/emp-ot.h"
 #include "emp-zk/emp-zk-arith/triple_auth.h"
+#include <algorithm>
+#include <future>
+#include <vector>
 
 namespace emp {
 using namespace std;
@@ -33,28 +36,139 @@ public:
 
   BoolIO *io;
   PRG prg;
+  // Stored as the Svole<AuthValueFp> base pointer (= FpVOLE<AuthValueFp>*) but
+  // constructed as a SilentFpVOLE so begin()/next()/end() dispatch virtually to
+  // the threaded silent path. Borrowers (EdaBits / FpPolyProof) take the same
+  // base pointer, so the swap is transparent to them.
   FpVOLE<AuthValueFp> *vole = nullptr;
   FpAuthHelper *auth_helper = nullptr;
 
-  int64_t CHECK_SZ = 1024 * 1024;
+  int threads_ = 1;
+  ThreadPool *pool_ = nullptr;   // null when threads_ <= 1
 
-  FpOSTriple(int party, BoolIO *io) {
+  int64_t CHECK_SZ = 8 * 1024 * 1024;
+
+  // ---- Optional phase profiling (EMP_PROFILE=1) -----------------------
+  // Accumulate wall-time per major component; printed once at teardown.
+  double prof_fill_setup_us = 0.0;   // first VOLE fill (in ctor → counts as setup)
+  double prof_fill_online_us = 0.0;  // VOLE refills during the gate loop
+  double prof_check_us = 0.0;        // andgate batch correctness checks
+  double prof_mul_compute_us = 0.0;  // vectorized mul: threaded field arithmetic
+  double prof_mul_send_us = 0.0;     // vectorized mul: batched correction I/O
+  int64_t prof_fills_done_ = 0;
+
+  // Threaded batch fill of `n` (chunk-multiple) VOLE correlations into `buf`.
+  // The per-gate path then just fetches from this in-memory buffer; this fill is
+  // the actual VOLE-generation compute (cGGM eval + LPN), so it runs across the
+  // worker pool via the silent VOLE's wire-free produce_range. n_threads=1 is
+  // the serial path. CHECK_SZ is a chunk multiple for the b13 param.
+  void fill_vole_(AuthValueFp *buf, int64_t n) {
+    auto _t = clock_start();
+    auto *sv = static_cast<SilentFpVOLE<AuthValueFp> *>(vole);
+    sv->next_chunks_parallel(buf, n / sv->chunk_size(), threads_);
+    if (prof_fills_done_++ == 0) prof_fill_setup_us += time_from(_t);
+    else                         prof_fill_online_us += time_from(_t);
+  }
+
+  // Batched send/recv correction values for the vectorized multiply (one
+  // io->send_data / recv_data per CHECK_SZ-bounded block).
+  std::vector<uint64_t> s_scratch_;
+
+  // Split [0, cnt) across the worker pool; the last range runs on this thread.
+  // Serial (no pool work) when threads_<=1 or the batch is smaller than the
+  // worker count. The functor is joined before return, so capturing it by
+  // reference in the tasks is safe.
+  template <class F>
+  void run_parallel_(F &&work, int64_t cnt) {
+    if (threads_ <= 1 || pool_ == nullptr || cnt < (int64_t)threads_) {
+      work((int64_t)0, cnt);
+      return;
+    }
+    const int64_t per = cnt / threads_;
+    std::vector<std::future<void>> fut;
+    int64_t start = 0;
+    for (int t = 0; t < threads_ - 1; ++t) {
+      const int64_t lo = start, hi = start + per;
+      fut.push_back(pool_->enqueue([&work, lo, hi]() { work(lo, hi); }));
+      start += per;
+    }
+    work(start, cnt);
+    for (auto &f : fut) f.get();
+  }
+
+  // Per-block sender compute: fresh VOLE → d=a·b, s=mac-d (batched into
+  // s_scratch_), output MAC into buffer slot base+i and out[i]. Threaded.
+  void mul_block_send_(__uint128_t *out, const __uint128_t *Ma,
+                       const __uint128_t *Mb, int64_t base, int64_t cnt) {
+    auto work = [&](int64_t lo, int64_t hi) {
+      for (int64_t i = lo; i < hi; ++i) {
+        __uint128_t mac = andgate_out_buffer[base + i];   // pre-drawn fresh VOLE
+        andgate_left_buffer[base + i]  = Ma[i];
+        andgate_right_buffer[base + i] = Mb[i];
+        uint64_t d = mult_mod(VAL(Ma[i]), VAL(Mb[i]));
+        s_scratch_[i] = add_mod(VAL(mac), PR - d);
+        __uint128_t omac = MAKE_AUTH(d, MAC(mac));
+        andgate_out_buffer[base + i] = omac;              // overwrite with output MAC
+        out[i] = omac;
+      }
+    };
+    run_parallel_(work, cnt);
+  }
+
+  // Per-block receiver compute: fresh VOLE key + the received d (in s_scratch_)
+  // → wire key MAKE_AUTH(0, mac + d·Δ) into buffer slot base+i and out[i].
+  void mul_block_recv_(__uint128_t *out, const __uint128_t *Ka,
+                       const __uint128_t *Kb, int64_t base, int64_t cnt) {
+    auto work = [&](int64_t lo, int64_t hi) {
+      for (int64_t i = lo; i < hi; ++i) {
+        __uint128_t key = andgate_out_buffer[base + i];   // pre-drawn fresh VOLE key
+        andgate_left_buffer[base + i]  = Ka[i];
+        andgate_right_buffer[base + i] = Kb[i];
+        uint64_t delta_d = mult_mod(s_scratch_[i], (uint64_t)delta);
+        __uint128_t wkey = MAKE_AUTH(0, add_mod(MAC(key), delta_d));
+        andgate_out_buffer[base + i] = wkey;              // overwrite with wire key
+        out[i] = wkey;
+      }
+    };
+    run_parallel_(work, cnt);
+  }
+
+  FpOSTriple(int party, BoolIO *io, int threads = 1,
+             int64_t expected_vole = 0) {
     this->party = party;
     this->io = io;
+    this->threads_ = threads < 1 ? 1 : threads;
+    if (this->threads_ > 1) pool_ = new ThreadPool((size_t)this->threads_);
 
     if (party == BOB) delta_gen();
-    vole = new FpVOLE<AuthValueFp>(3 - party, io);
+    // SilentFpVOLE threads its begin()-time cGGM expand / VW fold over its own
+    // n_threads pool; next_n() is wire-free after begin and rolls rounds
+    // transparently. At threads_==1 it is wire-equivalent to the plain FpVOLE.
+    vole = new SilentFpVOLE<AuthValueFp>(3 - party, io, /*malicious=*/true,
+                                         tuning::ferret_b13, this->threads_);
     if (party == BOB) vole->set_delta((uint64_t)delta);
     // One persistent sVOLE session for the whole proof; authenticated
     // values are drawn via vole->next_n() (the EdaBits / FpPolyProof
     // gadgets borrow this same vole). Amortizes the per-round end-work
     // instead of paying it per draw as repeated run(_, 1) did. Closed in
     // the destructor, after those borrowers have been torn down.
-    vole->begin();
+    //
+    // PREPAY the whole proof's VOLE when its size is known (expected_vole):
+    // begin(n) ships all K = ceil(n / cots_per_round) rounds' corrections +
+    // checks up front, so the threaded next_chunks_parallel() produce runs
+    // purely wire-free. Without it (expected_vole == 0) only one round is
+    // prepaid, and producing past cots_per_round triggers live, wire-bound
+    // end()+begin() rollovers mid-produce that don't thread — the reason the
+    // in-proof VOLE-produce scaled ~1.7x vs the standalone ~3.7x.
+    if (expected_vole > 0)
+      static_cast<SilentFpVOLE<AuthValueFp> *>(vole)->begin(expected_vole);
+    else
+      vole->begin();
 
     andgate_out_buffer.resize(CHECK_SZ);
     andgate_left_buffer.resize(CHECK_SZ);
     andgate_right_buffer.resize(CHECK_SZ);
+    s_scratch_.resize(CHECK_SZ);            // batched correction values (vectorized mul)
     __uint128_t tmp;
     vole->next_n((AuthValueFp *)&tmp, 1);
     // Pre-draw the first batch of authenticated values into
@@ -63,7 +177,7 @@ public:
     // batch check), and the batch boundary reloads after each check. The
     // bulk draw keeps the VOLE recv contiguous instead of interleaving a
     // single next_n with the per-gate value exchange the other way.
-    vole->next_n((AuthValueFp *)andgate_out_buffer.data(), CHECK_SZ);
+    fill_vole_((AuthValueFp *)andgate_out_buffer.data(), CHECK_SZ);
 
     auth_helper = new FpAuthHelper(party, io);
   }
@@ -75,6 +189,17 @@ public:
     delete auth_helper;
     vole->end();        // close the persistent sVOLE session (borrowers already gone)
     delete vole;
+    delete pool_;
+    if (getenv("EMP_PROFILE")) {
+      fprintf(stderr,
+              "[arith-prof p%d] vole_fill_setup=%.1fms vole_refill=%.1fms "
+              "andgate_check=%.1fms\n",
+              party, prof_fill_setup_us / 1000.0, prof_fill_online_us / 1000.0,
+              prof_check_us / 1000.0);
+      fprintf(stderr,
+              "[arith-prof p%d] vec_mul_compute=%.1fms vec_mul_io=%.1fms\n",
+              party, prof_mul_compute_us / 1000.0, prof_mul_send_us / 1000.0);
+    }
   }
   /* ---------------------inputs----------------------*/
 
@@ -135,7 +260,7 @@ public:
     if (check_cnt == CHECK_SZ) {
       andgate_correctness_check_manage();
       check_cnt = 0;
-      vole->next_n((AuthValueFp *)andgate_out_buffer.data(), CHECK_SZ);
+      fill_vole_((AuthValueFp *)andgate_out_buffer.data(), CHECK_SZ);
     }
     __uint128_t mac = andgate_out_buffer[check_cnt];   // pre-drawn fresh VOLE
     andgate_left_buffer[check_cnt] = Ma;
@@ -157,7 +282,7 @@ public:
     if (check_cnt == CHECK_SZ) {
       andgate_correctness_check_manage();
       check_cnt = 0;
-      vole->next_n((AuthValueFp *)andgate_out_buffer.data(), CHECK_SZ);
+      fill_vole_((AuthValueFp *)andgate_out_buffer.data(), CHECK_SZ);
     }
     __uint128_t key = andgate_out_buffer[check_cnt];   // pre-drawn fresh VOLE key
     andgate_left_buffer[check_cnt] = Ka;
@@ -175,23 +300,110 @@ public:
     return key;
   }
 
+  // ---- Vectorized AND-gate multiply (batched + threaded) --------------
+  //
+  // Computes `n` INDEPENDENT multiplications c_i = a_i * b_i in one shot:
+  // takes the input wire arrays, writes the output wire MACs into `out`, and
+  // ships every correction value `s_i` in a single send_data (the per-gate
+  // scalar path sends them one at a time). All triples land in the
+  // andgate_*_buffer slots [check_cnt, check_cnt+n) exactly as the scalar
+  // path would, so the wire bytes and the batch check are byte-identical to
+  // calling the scalar version n times — provided the n gates are independent
+  // (no a_i/b_i depends on another c_j in the same call). The per-gate field
+  // arithmetic is split across the worker pool; the batch send/recv is serial.
+  // Crosses CHECK_SZ boundaries safely (runs the check + VOLE refill inline).
+  void auth_compute_mul_send(__uint128_t *out, const __uint128_t *Ma,
+                             const __uint128_t *Mb, int64_t n) {
+    int64_t done = 0;
+    while (done < n) {
+      if (check_cnt == CHECK_SZ) {
+        andgate_correctness_check_manage();
+        check_cnt = 0;
+        fill_vole_((AuthValueFp *)andgate_out_buffer.data(), CHECK_SZ);
+      }
+      const int64_t take = std::min<int64_t>(CHECK_SZ - check_cnt, n - done);
+      auto _tc = clock_start();
+      mul_block_send_(out + done, Ma + done, Mb + done, check_cnt, take);
+      prof_mul_compute_us += time_from(_tc);
+      auto _ts = clock_start();
+      io->send_data(s_scratch_.data(), (size_t)take * sizeof(uint64_t));
+      prof_mul_send_us += time_from(_ts);
+      check_cnt += take;
+      done += take;
+    }
+  }
+
+  void auth_compute_mul_recv(__uint128_t *out, const __uint128_t *Ka,
+                             const __uint128_t *Kb, int64_t n) {
+    int64_t done = 0;
+    while (done < n) {
+      if (check_cnt == CHECK_SZ) {
+        andgate_correctness_check_manage();
+        check_cnt = 0;
+        fill_vole_((AuthValueFp *)andgate_out_buffer.data(), CHECK_SZ);
+      }
+      const int64_t take = std::min<int64_t>(CHECK_SZ - check_cnt, n - done);
+      auto _ts = clock_start();
+      io->recv_data(s_scratch_.data(), (size_t)take * sizeof(uint64_t));
+      prof_mul_send_us += time_from(_ts);
+      auto _tc = clock_start();
+      mul_block_recv_(out + done, Ka + done, Kb + done, check_cnt, take);
+      prof_mul_compute_us += time_from(_tc);
+      check_cnt += take;
+      done += take;
+    }
+  }
+
   /* ---------------------check----------------------*/
 
   void andgate_correctness_check_manage() {
+    auto _tprof = clock_start();
     io->flush();
 
     uint64_t U = 0, V = 0, W = 0;
-    block share_seed;
-    share_seed_gen(&share_seed, 1);
+    // One chi seed per worker — each thread folds its disjoint slice with an
+    // independent universal hash, exchanged once on the main thread.
+    std::vector<block> share_seed(threads_);
+    share_seed_gen(share_seed.data(), (uint32_t)threads_);
     io->flush();
 
-    uint64_t sum[2];
-    andgate_correctness_check(sum, 0, 0, check_cnt, &share_seed);
+    // ret holds per-thread partials: (U_i, V_i) for ALICE, W_i for BOB.
+    std::vector<uint64_t> sum(2 * (size_t)threads_, 0);
+    if (threads_ <= 1 || pool_ == nullptr) {
+      andgate_correctness_check(sum.data(), 0, 0, (uint32_t)check_cnt,
+                                share_seed.data());
+    } else {
+      // Split the check_cnt buffered triples into disjoint ranges, one per
+      // worker; the last (this) thread takes the remainder. Each writes its own
+      // ret slot, so no synchronization until the join. (Port of legacy
+      // emp-zk-arith/ostriple.h andgate_correctness_check_manage.)
+      const uint32_t task_base = (uint32_t)(check_cnt / threads_);
+      uint64_t *sum_ptr = sum.data();
+      block *seed_ptr = share_seed.data();
+      std::vector<std::future<void>> fut;
+      uint32_t start = 0;
+      for (int i = 0; i < threads_ - 1; ++i) {
+        const uint32_t s = start;
+        const int idx = i;
+        fut.push_back(pool_->enqueue([this, sum_ptr, idx, s, task_base,
+                                      seed_ptr]() {
+          andgate_correctness_check(sum_ptr, idx, s, task_base, seed_ptr);
+        }));
+        start += task_base;
+      }
+      andgate_correctness_check(sum.data(), threads_ - 1, start,
+                                (uint32_t)check_cnt - start, share_seed.data());
+      for (auto &f : fut) f.get();
+    }
+
     if (party == ALICE) {
-      U = sum[0];
-      V = sum[1];
-    } else
-      W = sum[0];
+      for (int i = 0; i < threads_; ++i) {
+        U = add_mod(U, sum[2 * i]);
+        V = add_mod(V, sum[2 * i + 1]);
+      }
+    } else {
+      for (int i = 0; i < threads_; ++i) W = add_mod(W, sum[i]);
+    }
 
     if (party == ALICE) {
       __uint128_t ope_data;
@@ -215,6 +427,7 @@ public:
         error("multiplication gates check fails");
     }
     io->flush();
+    prof_check_us += time_from(_tprof);
   }
 
   void andgate_correctness_check(uint64_t *ret, int thr_idx, uint32_t start,

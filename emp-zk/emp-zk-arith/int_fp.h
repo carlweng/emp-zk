@@ -48,21 +48,45 @@ public:
     return res;
   }
 
+  // Subtraction: a - b = a + (p - b), componentwise modular subtract. Local.
+  IntFp operator-(const IntFp &rhs) const {
+    IntFp res(*this);
+    res.value = ZKFpExec::zk_exec->sub_gate(this->value, rhs.value);
+    return res;
+  }
+
   IntFp operator*(const IntFp &rhs) const {
     IntFp res(*this);
     res.value = ZKFpExec::zk_exec->mul_gate(this->value, rhs.value);
     return res;
   }
 
+  // ---- Public F_p constant ops (rhs is a cleartext constant, not a wire) ----
+  // c is committed as a public label and combined locally (no communication):
+  //   * uses mul_const_gate; + / - go through pub_label + add_gate / sub_gate.
   IntFp operator*(const uint64_t &rhs) const {
     IntFp res(*this);
     res.value = ZKFpExec::zk_exec->mul_const_gate(this->value, rhs);
     return res;
   }
 
-  IntFp negate() {
+  IntFp operator+(const uint64_t &rhs) const {
     IntFp res(*this);
-    res.value = ZKFpExec::zk_exec->mul_const_gate(this->value, p - 1);
+    res.value = ZKFpExec::zk_exec->add_gate(this->value,
+                                            ZKFpExec::zk_exec->pub_label(rhs));
+    return res;
+  }
+
+  IntFp operator-(const uint64_t &rhs) const {
+    IntFp res(*this);
+    res.value = ZKFpExec::zk_exec->sub_gate(this->value,
+                                            ZKFpExec::zk_exec->pub_label(rhs));
+    return res;
+  }
+
+  IntFp negate() const {
+    IntFp res(*this);
+    res.value = ZKFpExec::zk_exec->neg_gate(this->value);
     return res;
   }
 };

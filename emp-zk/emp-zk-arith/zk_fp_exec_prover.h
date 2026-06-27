@@ -10,9 +10,10 @@ public:
   FpOSTriple *ostriple;
   BoolIO *io = nullptr;
 
-  ZKFpExecPrv(BoolIO *io) : ZKFpExec() {
+  ZKFpExecPrv(BoolIO *io, int threads = 1, int64_t expected_vole = 0)
+      : ZKFpExec() {
     this->io = io;
-    this->ostriple = new FpOSTriple(ALICE, io);
+    this->ostriple = new FpOSTriple(ALICE, io, threads, expected_vole);
   }
 
   ~ZKFpExecPrv() { delete ostriple; }
@@ -55,9 +56,31 @@ public:
     return (mac << 64) ^ val;
   }
 
+  __uint128_t sub_gate(const __uint128_t &a, const __uint128_t &b) {
+    // a - b = a + (p - b) on each share (add pr first to avoid underflow).
+    __uint128_t val = mod((a & 0xFFFFFFFFFFFFFFFFULL) + pr -
+                              (b & 0xFFFFFFFFFFFFFFFFULL),
+                          pr);
+    __uint128_t mac = mod((a >> 64) + pr - (b >> 64), pr);
+    return (mac << 64) ^ val;
+  }
+
+  __uint128_t neg_gate(const __uint128_t &a) {
+    // -a = (p - val, p - mac); p - 0 = p == 0 mod p, so a zero share stays 0.
+    __uint128_t val = mod(pr - (a & 0xFFFFFFFFFFFFFFFFULL), pr);
+    __uint128_t mac = mod(pr - (a >> 64), pr);
+    return (mac << 64) ^ val;
+  }
+
   __uint128_t mul_gate(const __uint128_t &a, const __uint128_t &b) {
     ++this->gid;
     return ostriple->auth_compute_mul_send(a, b);
+  }
+
+  void mul_gate(__uint128_t *out, const __uint128_t *a, const __uint128_t *b,
+                int64_t len) {
+    this->gid += len;
+    ostriple->auth_compute_mul_send(out, a, b, len);
   }
 
   __uint128_t mul_const_gate(const __uint128_t &a, const uint64_t &b) {

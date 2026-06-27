@@ -4,6 +4,8 @@
 #include "emp-tool/emp-tool.h"
 #include "emp-zk/emp-zk-arith/ostriple.h"
 #include "emp-zk/emp-zk-bool/emp-zk-bool.h"
+#include <future>
+#include <vector>
 
 namespace emp {
 using namespace std;
@@ -34,6 +36,42 @@ public:
   }
 
   ~FpPolyProof() { batch_check(); }
+
+  // Below this per-call length the loop is cheaper serial than the pool
+  // dispatch; above it, split [0,n) across ostriple's worker pool.
+  static constexpr int64_t kParMin = 64;
+
+  // Parallel F_p sum of f(i) over [0,n), reusing FpOSTriple's ThreadPool.
+  // Serial when single-threaded or below kParMin. Each worker accumulates a
+  // private partial; partials are add_mod-combined (field add is associative).
+  template <typename Fn>
+  uint64_t par_sum_(int64_t n, Fn &&f) const {
+    const int T = ostriple->threads_;
+    ThreadPool *pool = ostriple->pool_;
+    if (T <= 1 || pool == nullptr || n < kParMin) {
+      uint64_t s = 0;
+      for (int64_t i = 0; i < n; ++i) s = add_mod(s, f(i));
+      return s;
+    }
+    std::vector<uint64_t> part((size_t)T, 0);
+    const int64_t width = n / T;
+    std::vector<std::future<void>> fut;
+    for (int t = 0; t < T - 1; ++t) {
+      const int64_t s = (int64_t)t * width, e = s + width;
+      fut.push_back(pool->enqueue([&part, t, s, e, &f]() {
+        uint64_t acc = 0;
+        for (int64_t i = s; i < e; ++i) acc = add_mod(acc, f(i));
+        part[(size_t)t] = acc;
+      }));
+    }
+    uint64_t acc = 0;
+    for (int64_t i = (int64_t)(T - 1) * width; i < n; ++i) acc = add_mod(acc, f(i));
+    part[(size_t)(T - 1)] = acc;
+    for (auto &fu : fut) fu.get();
+    uint64_t r = 0;
+    for (int t = 0; t < T; ++t) r = add_mod(r, part[(size_t)t]);
+    return r;
+  }
 
   void batch_check() {
     if (num == 0)
@@ -81,33 +119,22 @@ public:
       batch_check();
 
     if (party == ALICE) {
-      uint64_t A0 = 0, A1 = 0;
-      uint64_t w0, w1, m0, m1, tmp;
-      for (int64_t i = 0; i < len; ++i) {
-        w0 = VAL(polyx[i]);
-        m0 = MAC(polyx[i]);
-        w1 = VAL(polyy[i]);
-        m1 = MAC(polyy[i]);
-
-        tmp = mult_mod(m0, m1);
-        tmp = mult_mod(coeff[i + 1], tmp);
-        A0 = add_mod(A0, tmp);
-
-        tmp = add_mod(mult_mod(m0, w1), mult_mod(m1, w0));
-        tmp = mult_mod(coeff[i + 1], tmp);
-        A1 = add_mod(A1, tmp);
-      }
+      // A0 = Σ coeff[i+1]·(m0·m1);  A1 = Σ coeff[i+1]·(m0·w1 + m1·w0).
+      uint64_t A0 = par_sum_(len, [&](int64_t i) {
+        return mult_mod(coeff[i + 1], mult_mod(MAC(polyx[i]), MAC(polyy[i])));
+      });
+      uint64_t A1 = par_sum_(len, [&](int64_t i) {
+        uint64_t t = add_mod(mult_mod(MAC(polyx[i]), VAL(polyy[i])),
+                             mult_mod(MAC(polyy[i]), VAL(polyx[i])));
+        return mult_mod(coeff[i + 1], t);
+      });
       buffer[num] = A0;
       buffer1[num] = A1;
     } else {
-      uint64_t B = 0;
-      uint64_t tmp;
-      for (int64_t i = 0; i < len; ++i) {
-        tmp = mult_mod(MAC(polyx[i]), MAC(polyy[i]));
-        tmp = mult_mod(coeff[i + 1], tmp);
-        B = add_mod(B, tmp);
-      }
-      tmp = mult_mod(delta, delta);
+      uint64_t B = par_sum_(len, [&](int64_t i) {
+        return mult_mod(coeff[i + 1], mult_mod(MAC(polyx[i]), MAC(polyy[i])));
+      });
+      uint64_t tmp = mult_mod(delta, delta);
       tmp = mult_mod(coeff[0], tmp);
       B = add_mod(B, tmp);
       buffer[num] = B;
@@ -121,30 +148,21 @@ public:
       batch_check();
 
     if (party == ALICE) {
-      uint64_t A0 = 0, A1 = 0;
-      uint64_t w0, w1, m0, m1, tmp;
-      for (int64_t i = 0; i < len; ++i) {
-        w0 = VAL(polyx[i]);
-        m0 = MAC(polyx[i]);
-        w1 = VAL(polyy[i]);
-        m1 = MAC(polyy[i]);
-
-        tmp = mult_mod(m0, m1);
-        A0 = add_mod(A0, tmp);
-
-        tmp = add_mod(mult_mod(m0, w1), mult_mod(m1, w0));
-        A1 = add_mod(A1, tmp);
-      }
+      // A0 = Σ m0·m1;  A1 = Σ (m0·w1 + m1·w0).
+      uint64_t A0 = par_sum_(len, [&](int64_t i) {
+        return mult_mod(MAC(polyx[i]), MAC(polyy[i]));
+      });
+      uint64_t A1 = par_sum_(len, [&](int64_t i) {
+        return add_mod(mult_mod(MAC(polyx[i]), VAL(polyy[i])),
+                       mult_mod(MAC(polyy[i]), VAL(polyx[i])));
+      });
       buffer[num] = A0;
       buffer1[num] = A1;
     } else {
-      uint64_t B = 0;
-      uint64_t tmp;
-      for (int64_t i = 0; i < len; ++i) {
-        tmp = mult_mod(MAC(polyx[i]), MAC(polyy[i]));
-        B = add_mod(B, tmp);
-      }
-      tmp = mult_mod(delta, delta);
+      uint64_t B = par_sum_(len, [&](int64_t i) {
+        return mult_mod(MAC(polyx[i]), MAC(polyy[i]));
+      });
+      uint64_t tmp = mult_mod(delta, delta);
       tmp = mult_mod(constant, tmp);
       B = add_mod(B, tmp);
       buffer[num] = B;

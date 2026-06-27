@@ -10,8 +10,8 @@ using namespace std;
 
 class ZKBoolProver : public ZKBoolBase {
 public:
-  ZKBoolProver(BoolIO *io, int64_t expected_cots = 0)
-      : ZKBoolBase(ALICE, io, expected_cots) {
+  ZKBoolProver(BoolIO *io, int64_t expected_cots = 0, int n_threads = 1)
+      : ZKBoolBase(ALICE, io, expected_cots, n_threads) {
     // PUBLIC label for bit 1 has its LSB set so getLSB() reads back the
     // cleartext value. (Verifier instead xors zdelta into pub_label[1].)
     pub_label[1] = pub_label[1] ^ makeBlock(0, 1);
@@ -74,7 +74,7 @@ private:
   // Authenticated-bit input: receive a fresh COT pair, embed the cleartext
   // bit in the LSB, send the masking flip to BOB.
   void authenticated_bits_input(block *auth, const bool *in, int64_t len) {
-    ferret->next_n(auth, len);
+    draw_cot_(auth, len);
     for (int64_t i = 0; i < len; ++i) {
       bool buff = getLSB(auth[i]) ^ in[i];
       auth[i] = with_lsb(auth[i], in[i]);
@@ -93,8 +93,7 @@ private:
       check_cnt = 0;
     }
 
-    block auth;
-    ferret->next_n(&auth, 1);                     // fresh COT from the stream
+    block auth = draw_one_cot_();                 // fresh COT (threaded prefetch)
     andgate_left_buffer[check_cnt]  = a;
     andgate_right_buffer[check_cnt] = b;
 
@@ -119,22 +118,25 @@ private:
     auth_hash.put_block(output, length);
   }
 
-  void andgate_correctness_check(block *ret, int64_t task_n,
-                                 block chi_seed) override {
+  void andgate_correctness_check(block *ret, int thr_idx, int64_t start,
+                                 int64_t task_n, block chi_seed) override {
+    ret[2 * thr_idx] = zero_block;
+    ret[2 * thr_idx + 1] = zero_block;
     if (task_n == 0) return;
     const block *left    = andgate_left_buffer.data();
     const block *right   = andgate_right_buffer.data();
     const block *gateout = andgate_out_buffer.data();
 
-    // Fold the buffered triples into (ret[0], ret[1]) one cache-resident
-    // chunk at a time: per chunk derive its chi slice and form the per-gate
-    // coefficients (A0 = left*right; A1 the linear term, branchless via
-    // select_mask[lsb]). Avoids rewriting the multi-MB triple buffers and a
-    // task_n-sized chi array. Accumulate the *unreduced* 256-bit chi inner
-    // products across all chunks and reduce once at the end -- GF(2^128)
-    // reduction is linear over XOR, so this is bit-identical to one big
-    // reduced pass while paying one reduce per output instead of per chunk.
+    // Fold the buffered triples [start, start+task_n) into (ret[2t], ret[2t+1])
+    // one cache-resident chunk at a time: per chunk derive its chi slice and
+    // form the per-gate coefficients (A0 = left*right; A1 the linear term,
+    // branchless via select_mask[lsb]). Accumulate the *unreduced* 256-bit chi
+    // inner products and reduce once at the end -- GF(2^128) reduction is linear
+    // over XOR, so this is bit-identical to one big reduced pass and to the
+    // XOR-combined multi-worker split. PRG is seeked to `start` so each worker's
+    // chi slice matches the single continuous serial stream.
     PRG prg(&chi_seed);
+    prg.seek((uint64_t)start);
     constexpr int64_t kChunk = 1024;
     block chi[kChunk], A0[kChunk], A1[kChunk];
     block acc0[2] = {zero_block, zero_block}, acc1[2] = {zero_block, zero_block};
@@ -142,10 +144,10 @@ private:
       const int64_t m = (task_n - base < kChunk) ? (task_n - base) : kChunk;
       prg.random_block(chi, m);
       for (int64_t i = 0; i < m; ++i) {
-        const block l = left[base + i], rt = right[base + i];
+        const block l = left[start + base + i], rt = right[start + base + i];
         gfmul(l, rt, &A0[i]);
         A1[i] = (select_mask[getLSB(l)]  & rt) ^
-                (select_mask[getLSB(rt)] & l)  ^ gateout[base + i];
+                (select_mask[getLSB(rt)] & l)  ^ gateout[start + base + i];
       }
       block p[2];
       vector_inn_prdt_sum_no_red(p, chi, A0, m);
@@ -153,13 +155,13 @@ private:
       vector_inn_prdt_sum_no_red(p, chi, A1, m);
       acc1[0] = acc1[0] ^ p[0];  acc1[1] = acc1[1] ^ p[1];
     }
-    ret[0] = reduce(acc0[0], acc0[1]);
-    ret[1] = reduce(acc1[0], acc1[1]);
+    ret[2 * thr_idx]     = reduce(acc0[0], acc0[1]);
+    ret[2 * thr_idx + 1] = reduce(acc1[0], acc1[1]);
   }
 
   void andgate_correctness_aggregate(block *sum) override {
     block ope_data[128];
-    ferret->next_n(ope_data, 128);
+    draw_cot_(ope_data, 128);
     uint64_t ch_bits[2];
     for (int i = 0; i < 2; ++i) {
       ch_bits[i] = getLSB(ope_data[64 * i + 63]) ? 1 : 0;
@@ -226,7 +228,7 @@ private:
     f2k_check(sum, f2k_check_cnt, seed);
 
     block ope_data[128];
-    ferret->next_n(ope_data, 128);
+    draw_cot_(ope_data, 128);
     uint64_t ch_bits[2];
     for (int i = 0; i < 2; ++i) {
       ch_bits[i] = getLSB(ope_data[64 * i + 63]) ? 1 : 0;

@@ -39,7 +39,21 @@ public:
 
   virtual __uint128_t add_gate(const __uint128_t &a, const __uint128_t &b) = 0;
 
+  // a - b = a + (p - b), componentwise modular subtraction on the shares
+  // (local, no communication) — the additive counterpart of add_gate.
+  virtual __uint128_t sub_gate(const __uint128_t &a, const __uint128_t &b) = 0;
+
+  // -a = p - a componentwise (additive negation, local).
+  virtual __uint128_t neg_gate(const __uint128_t &a) = 0;
+
   virtual __uint128_t mul_gate(const __uint128_t &a, const __uint128_t &b) = 0;
+
+  // Vectorized multiply: `len` INDEPENDENT products out_i = a_i * b_i in one
+  // batched, threaded call (routes to the vectorized auth_compute_mul). Used by
+  // IntFpVec; equivalent to `len` scalar mul_gate calls but with a single
+  // batched correction send and parallel field arithmetic.
+  virtual void mul_gate(__uint128_t *out, const __uint128_t *a,
+                        const __uint128_t *b, int64_t len) = 0;
 
   virtual __uint128_t mul_const_gate(const __uint128_t &a,
                                      const uint64_t &b) = 0;

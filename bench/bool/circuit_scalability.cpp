@@ -7,13 +7,13 @@ using namespace std;
 int party;
 using Int32 = Int_T<ZKBoolSession::ctx_t, 32>;   // signed, fixed width: a WireValue
 
-void test_circuit_zk(BoolIO *io, int party, int input_sz_lg) {
+void test_circuit_zk(BoolIO *io, int party, int input_sz_lg, int threads) {
 
   long long input_sz = 1 << input_sz_lg;
   // ~100 AND gates per iteration ⇒ ~100*input_sz COTs; size the SilentFerret
   // prepay to that so all COT traffic + malicious checks ship once at setup and
   // the whole proof's COT draws are wire-free (minimal round-trips).
-  ZKBoolSession sess(io, party, 100LL * input_sz);
+  ZKBoolSession sess(io, party, 100LL * input_sz, threads);
   auto start = clock_start();
   Int32 a = sess.input<Int32>(ALICE, 2);
   Int32 b = sess.input<Int32>(ALICE, 3);
@@ -59,8 +59,9 @@ int main(int argc, char **argv) {
   } else {
     num = atoi(argv[2]);
   }
+  int threads = (argc > 3) ? std::max(1, atoi(argv[3])) : 1;
 
-  test_circuit_zk(&io, party, num);
+  test_circuit_zk(&io, party, num, threads);
 
   return 0;
 }

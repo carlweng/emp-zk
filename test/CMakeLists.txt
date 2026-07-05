@@ -46,6 +46,7 @@ add_test_case_with_run(arith int_fp_vec)
 # (input/circuit _scalability are build-only benchmarks — see ../bench)
 add_test_case_with_run(arith polynomial)
 add_test_case_with_run(arith inner_prdt)
+add_test_case_with_run(arith mixed_check)
 add_test_case_with_run(arith matrix_mul)
 add_test_case_with_run(arith sis)
 

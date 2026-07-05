@@ -11,10 +11,11 @@ public:
   BoolIO *io = nullptr;
   __uint128_t delta;
 
-  ZKFpExecVer(BoolIO *io, int threads = 1, int64_t expected_vole = 0)
+  ZKFpExecVer(BoolIO *io, int threads = 1, int64_t expected_vole = 0,
+              BoolIO *vole_io = nullptr)
       : ZKFpExec() {
     this->io = io;
-    this->ostriple = new FpOSTriple(BOB, io, threads, expected_vole);
+    this->ostriple = new FpOSTriple(BOB, io, threads, expected_vole, vole_io);
     this->delta = this->ostriple->delta;
   }
 

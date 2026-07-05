@@ -17,15 +17,19 @@ using namespace std;
 // Arithmetic-only setup (no bool<->arith conversion). `threads` sizes the
 // FpOSTriple AND-triple-check pool and the inner SilentFpVOLE expansion pool
 // (1 = single-threaded, wire-equivalent to the prior FpVOLE path).
+// `vole_io` (optional): a second socket enabling the background sVOLE path (the
+// sVOLE runs on it in a producer thread; the engine consumes via a pipe). It
+// requires expected_vole > 0 (an upper bound on correlations consumed) and does
+// NOT support bool<->arith conversion (use the single-socket overload for that).
 inline void setup_zk_arith(BoolIO *io, int party, int threads = 1,
-                           int64_t expected_vole = 0) {
+                           int64_t expected_vole = 0, BoolIO *vole_io = nullptr) {
   if (party == ALICE) {
-    ZKFpExec::zk_exec = new ZKFpExecPrv(io, threads, expected_vole);
+    ZKFpExec::zk_exec = new ZKFpExecPrv(io, threads, expected_vole, vole_io);
     FpPolyProof::fppolyproof =
         new FpPolyProof(ALICE, io,
                             ((ZKFpExecPrv *)(ZKFpExec::zk_exec))->ostriple);
   } else {
-    ZKFpExec::zk_exec = new ZKFpExecVer(io, threads, expected_vole);
+    ZKFpExec::zk_exec = new ZKFpExecVer(io, threads, expected_vole, vole_io);
     FpPolyProof::fppolyproof = new FpPolyProof(
         BOB, io, ((ZKFpExecVer *)(ZKFpExec::zk_exec))->ostriple);
   }

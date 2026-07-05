@@ -2,9 +2,12 @@
 #define FP_OS_TRIPLE_H__
 
 #include "emp-ot/emp-ot.h"
+#include "emp-zk/emp-zk-arith/correlation_pipe.h"
 #include "emp-zk/emp-zk-arith/triple_auth.h"
 #include <algorithm>
 #include <future>
+#include <memory>
+#include <thread>
 #include <vector>
 
 namespace emp {
@@ -48,6 +51,21 @@ public:
 
   int64_t CHECK_SZ = 8 * 1024 * 1024;
 
+  // ---- Background sVOLE (opt-in; enabled when a second socket is provided) --
+  // In background mode the SilentFpVOLE runs on its OWN socket (bg_io_) on a
+  // dedicated producer thread, streaming correlations into a CorrelationPipe;
+  // this engine consumes them via draw_vole() on the main socket. The sVOLE's
+  // round-trips (corrections + rollovers + malicious check) overlap this
+  // engine's work instead of stalling it. See correlation_pipe.h.
+  bool bg_ = false;
+  BoolIO *bg_io_ = nullptr;                         // caller-provided socket A
+  std::unique_ptr<CorrelationPipe<AuthValueFp>> pipe_;
+  std::thread producer_;
+  int64_t bg_batch_ = 1 << 20;                      // correlations per pipe slot
+  int64_t total_slots_ = 0;                         // deterministic producer count
+  int cur_slot_ = -1;                               // consumer FIFO reader state
+  int64_t cur_off_ = 0;
+
   // ---- Optional phase profiling (EMP_PROFILE=1) -----------------------
   // Accumulate wall-time per major component; printed once at teardown.
   double prof_fill_setup_us = 0.0;   // first VOLE fill (in ctor → counts as setup)
@@ -64,11 +82,42 @@ public:
   // the serial path. CHECK_SZ is a chunk multiple for the b13 param.
   void fill_vole_(AuthValueFp *buf, int64_t n) {
     auto _t = clock_start();
-    auto *sv = static_cast<SilentFpVOLE<AuthValueFp> *>(vole);
-    sv->next_chunks_parallel(buf, n / sv->chunk_size(), threads_);
+    if (bg_) {
+      draw_vole_(buf, n);                       // from the background pipe
+    } else {
+      auto *sv = static_cast<SilentFpVOLE<AuthValueFp> *>(vole);
+      sv->next_chunks_parallel(buf, n / sv->chunk_size(), threads_);
+    }
     if (prof_fills_done_++ == 0) prof_fill_setup_us += time_from(_t);
     else                         prof_fill_online_us += time_from(_t);
   }
+
+  // Unified VOLE draw. Default mode: straight from the (main-thread) sVOLE.
+  // Background mode: FIFO from the pipe the producer thread fills (this thread
+  // never touches the sVOLE / socket A). Same deterministic correlation stream
+  // in the same order either way. All engine + borrower draws route here.
+  void draw_vole_(AuthValueFp *out, int64_t n) {
+    if (!bg_) { vole->next_n(out, n); return; }
+    int64_t done = 0;
+    while (done < n) {
+      if (cur_slot_ < 0) {
+        cur_slot_ = pipe_->acquire_ready();
+        cur_off_ = 0;
+        if (cur_slot_ < 0)
+          error("background sVOLE drained: expected_vole too small");
+      }
+      const int64_t take = std::min(n - done, bg_batch_ - cur_off_);
+      memcpy(out + done, pipe_->slot[cur_slot_].data() + cur_off_,
+             (size_t)take * sizeof(AuthValueFp));
+      cur_off_ += take;
+      done += take;
+      if (cur_off_ == bg_batch_) { pipe_->release(); cur_slot_ = -1; }
+    }
+  }
+
+  // Public draw for borrowers (FpPolyProof) so every VOLE consumer shares the
+  // one stream — in background mode they must NOT touch vole->next_n directly.
+  void draw_vole(AuthValueFp *out, int64_t n) { draw_vole_(out, n); }
 
   // Batched send/recv correction values for the vectorized multiply (one
   // io->send_data / recv_data per CHECK_SZ-bounded block).
@@ -133,50 +182,70 @@ public:
     run_parallel_(work, cnt);
   }
 
-  FpOSTriple(int party, BoolIO *io, int threads = 1,
-             int64_t expected_vole = 0) {
+  // `vole_io` (optional): a SECOND socket, distinct from `io`. When provided,
+  // the sVOLE runs on it in a background producer thread and this engine draws
+  // correlations from a pipe (see draw_vole_). Requires expected_vole > 0 (an
+  // upper bound on the correlations the proof will consume). nullptr = the
+  // default single-socket path.
+  FpOSTriple(int party, BoolIO *io, int threads = 1, int64_t expected_vole = 0,
+             BoolIO *vole_io = nullptr) {
     this->party = party;
     this->io = io;
     this->threads_ = threads < 1 ? 1 : threads;
     if (this->threads_ > 1) pool_ = new ThreadPool((size_t)this->threads_);
+    bg_ = (vole_io != nullptr);
+    bg_io_ = vole_io;
 
     if (party == BOB) delta_gen();
-    // SilentFpVOLE threads its begin()-time cGGM expand / VW fold over its own
-    // n_threads pool; next_n() is wire-free after begin and rolls rounds
-    // transparently. At threads_==1 it is wire-equivalent to the plain FpVOLE.
-    vole = new SilentFpVOLE<AuthValueFp>(3 - party, io, /*malicious=*/true,
-                                         tuning::ferret_b13, this->threads_);
+    // The sVOLE lives on socket A (bg_io_) in background mode, else on `io`.
+    vole = new SilentFpVOLE<AuthValueFp>(3 - party, bg_ ? bg_io_ : io,
+                                         /*malicious=*/true, tuning::ferret_b13,
+                                         this->threads_);
     if (party == BOB) vole->set_delta((uint64_t)delta);
-    // One persistent sVOLE session for the whole proof; authenticated
-    // values are drawn via vole->next_n() (the EdaBits / FpPolyProof
-    // gadgets borrow this same vole). Amortizes the per-round end-work
-    // instead of paying it per draw as repeated run(_, 1) did. Closed in
-    // the destructor, after those borrowers have been torn down.
-    //
-    // PREPAY the whole proof's VOLE when its size is known (expected_vole):
-    // begin(n) ships all K = ceil(n / cots_per_round) rounds' corrections +
-    // checks up front, so the threaded next_chunks_parallel() produce runs
-    // purely wire-free. Without it (expected_vole == 0) only one round is
-    // prepaid, and producing past cots_per_round triggers live, wire-bound
-    // end()+begin() rollovers mid-produce that don't thread — the reason the
-    // in-proof VOLE-produce scaled ~1.7x vs the standalone ~3.7x.
-    if (expected_vole > 0)
-      static_cast<SilentFpVOLE<AuthValueFp> *>(vole)->begin(expected_vole);
-    else
-      vole->begin();
 
     andgate_out_buffer.resize(CHECK_SZ);
     andgate_left_buffer.resize(CHECK_SZ);
     andgate_right_buffer.resize(CHECK_SZ);
     s_scratch_.resize(CHECK_SZ);            // batched correction values (vectorized mul)
+
+    if (bg_) {
+      // Background mode: producer thread owns the sVOLE + socket A; this thread
+      // never touches them. The producer emits a DETERMINISTIC total_slots_
+      // (equal on both parties, since expected_vole matches) then runs the final
+      // malicious check, so both sVOLE end()s rendezvous on socket A.
+      if (expected_vole <= 0)
+        error("background sVOLE requires expected_vole (upper bound on draws)");
+      auto *sv = static_cast<SilentFpVOLE<AuthValueFp> *>(vole);
+      const int64_t chunk = sv->chunk_size();
+      bg_batch_ = ((bg_batch_ + chunk - 1) / chunk) * chunk;   // chunk-aligned
+      total_slots_ = (expected_vole + bg_batch_ - 1) / bg_batch_ + 2;
+      pipe_ = std::make_unique<CorrelationPipe<AuthValueFp>>(/*N=*/4, bg_batch_);
+      producer_ = std::thread([this] {
+        auto *s = static_cast<SilentFpVOLE<AuthValueFp> *>(vole);
+        s->begin(s->cots_per_round());     // 1 round prepaid; rollovers on A
+        for (int64_t b = 0; b < total_slots_; ++b) {
+          int i = pipe_->acquire_free();
+          if (i < 0) break;
+          s->next_n(pipe_->slot[i].data(), bg_batch_);   // wire-free / rollover→A
+          pipe_->publish();
+        }
+        pipe_->mark_producer_done();
+        s->end();                          // final malicious check on socket A
+      });
+    } else {
+      // Default single-socket path. PREPAY the whole proof's VOLE when its size
+      // is known (expected_vole) so the threaded produce runs wire-free (else 1
+      // round is prepaid and producing past it triggers live rollovers).
+      if (expected_vole > 0)
+        static_cast<SilentFpVOLE<AuthValueFp> *>(vole)->begin(expected_vole);
+      else
+        vole->begin();
+    }
+
     __uint128_t tmp;
-    vole->next_n((AuthValueFp *)&tmp, 1);
-    // Pre-draw the first batch of authenticated values into
-    // andgate_out_buffer; each multiplication consumes one slot (reads the
-    // fresh VOLE, then overwrites it with the gate's output MAC for the
-    // batch check), and the batch boundary reloads after each check. The
-    // bulk draw keeps the VOLE recv contiguous instead of interleaving a
-    // single next_n with the per-gate value exchange the other way.
+    draw_vole_((AuthValueFp *)&tmp, 1);
+    // Pre-draw the first batch of authenticated values into andgate_out_buffer;
+    // each multiplication consumes one slot and the batch boundary reloads.
     fill_vole_((AuthValueFp *)andgate_out_buffer.data(), CHECK_SZ);
 
     auth_helper = new FpAuthHelper(party, io);
@@ -187,7 +256,17 @@ public:
       andgate_correctness_check_manage();
     auth_helper->flush();
     delete auth_helper;
-    vole->end();        // close the persistent sVOLE session (borrowers already gone)
+    if (bg_) {
+      // Drain any produced-but-unconsumed slots so the producer completes its
+      // deterministic total_slots_ (equal on both parties) and reaches sv.end();
+      // do NOT finish() the pipe (that would cut the producer short → the two
+      // parties' end() checks would desync on socket A).
+      if (cur_slot_ >= 0) { pipe_->release(); cur_slot_ = -1; }
+      for (int s; (s = pipe_->acquire_ready()) >= 0;) pipe_->release();
+      if (producer_.joinable()) producer_.join();   // producer ran sv.end()
+    } else {
+      vole->end();      // close the persistent sVOLE session
+    }
     delete vole;
     delete pool_;
     if (getenv("EMP_PROFILE")) {
@@ -208,7 +287,7 @@ public:
    */
   __uint128_t authenticated_val_input(uint64_t w) {
     __uint128_t mac;
-    vole->next_n((AuthValueFp *)&mac, 1);
+    draw_vole_((AuthValueFp *)&mac, 1);
 
     uint64_t lam = PR - w;
     lam = add_mod(VAL(mac), lam);
@@ -218,7 +297,7 @@ public:
 
   void authenticated_val_input(__uint128_t *label, const uint64_t *w, int64_t len) {
     std::vector<uint64_t> lam(len);
-    vole->next_n((AuthValueFp *)label, len);
+    draw_vole_((AuthValueFp *)label, len);
 
     for (int64_t i = 0; i < len; ++i) {
       lam[i] = PR - w[i];
@@ -230,7 +309,7 @@ public:
 
   __uint128_t authenticated_val_input() {
     __uint128_t key;
-    vole->next_n((AuthValueFp *)&key, 1);
+    draw_vole_((AuthValueFp *)&key, 1);
 
     uint64_t lam;
     io->recv_data(&lam, sizeof(uint64_t));
@@ -243,7 +322,7 @@ public:
 
   void authenticated_val_input(__uint128_t *label, int64_t len) {
     std::vector<uint64_t> lam(len);
-    vole->next_n((AuthValueFp *)label, len);
+    draw_vole_((AuthValueFp *)label, len);
 
     io->recv_data(lam.data(), len * sizeof(uint64_t));
 
@@ -407,7 +486,7 @@ public:
 
     if (party == ALICE) {
       __uint128_t ope_data;
-      vole->next_n((AuthValueFp *)&ope_data, 1);
+      draw_vole_((AuthValueFp *)&ope_data, 1);
       uint64_t A0_star = MAC(ope_data);
       uint64_t A1_star = VAL(ope_data);
       uint64_t check_sum[2];
@@ -416,7 +495,7 @@ public:
       io->send_data(check_sum, 2 * sizeof(uint64_t));
     } else {
       __uint128_t ope_data;
-      vole->next_n((AuthValueFp *)&ope_data, 1);
+      draw_vole_((AuthValueFp *)&ope_data, 1);
       uint64_t B_star = MAC(ope_data);
       W = add_mod(W, B_star);
       uint64_t check_sum[2];
@@ -540,13 +619,13 @@ public:
 
   // sender
   void refill_send(__uint128_t *yz, int64_t *cnt, int64_t sz) {
-    vole->next_n((AuthValueFp *)yz, sz);
+    draw_vole_((AuthValueFp *)yz, sz);
     *cnt = 0;
   }
 
   // recver
   void refill_recv(__uint128_t *yz, int64_t *cnt, int64_t sz) {
-    vole->next_n((AuthValueFp *)yz, sz);
+    draw_vole_((AuthValueFp *)yz, sz);
     *cnt = 0;
   }
 

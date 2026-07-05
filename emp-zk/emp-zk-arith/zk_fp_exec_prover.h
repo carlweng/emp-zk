@@ -10,10 +10,11 @@ public:
   FpOSTriple *ostriple;
   BoolIO *io = nullptr;
 
-  ZKFpExecPrv(BoolIO *io, int threads = 1, int64_t expected_vole = 0)
+  ZKFpExecPrv(BoolIO *io, int threads = 1, int64_t expected_vole = 0,
+              BoolIO *vole_io = nullptr)
       : ZKFpExec() {
     this->io = io;
-    this->ostriple = new FpOSTriple(ALICE, io, threads, expected_vole);
+    this->ostriple = new FpOSTriple(ALICE, io, threads, expected_vole, vole_io);
   }
 
   ~ZKFpExecPrv() { delete ostriple; }

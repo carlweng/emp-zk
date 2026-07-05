@@ -100,6 +100,12 @@ public:
     int64_t done = 0;
     while (done < n) {
       if (cur_slot_ < 0) {
+        // About to (possibly) block waiting for the producer to fill the next
+        // round-buffer, whose fill is a CROSS-PARTY sVOLE round-trip. FLUSH the
+        // main socket first so the peer receives everything up to our position,
+        // finishes its round, and its producer joins that round-trip — otherwise
+        // an unflushed tail here would reintroduce the cross-party deadlock.
+        io->flush();
         cur_slot_ = pipe_->acquire_ready();
         cur_off_ = 0;
         if (cur_slot_ < 0)   // producer only stops at teardown; never mid-proof
@@ -210,26 +216,27 @@ public:
 
     if (bg_) {
       // Background mode: the producer thread owns the sVOLE + socket A; this
-      // thread never touches them. It streams correlations ON DEMAND (throttled
-      // by the pipe) and stops when the consumer signals at teardown — no fixed
-      // count, so `expected_vole` is NOT needed here (ignored).
+      // thread never touches them. `expected_vole` is not needed (ignored).
       //
-      // Lockstep: both parties run the identical proof, hence consume
-      // identically, hence their producers stay in lockstep round-for-round.
-      // Mid-stream rollovers are mutual socket-A round-trips (they self-
-      // rendezvous), and SilentSvole::end() is local (its checks already ran at
-      // each begin()), so both end()s need no coordination. The pipe is kept
-      // small so the producer's look-ahead (wasted-if-unused production) stays a
-      // few batches — well under one sVOLE round.
+      // ROUND-SIZED DOUBLE BUFFER (deadlock-free). Each pipe slot holds exactly
+      // one sVOLE round (cots_per_round), and there are two of them: the producer
+      // fills one (a cross-party round-trip on socket A) while the consumer drains
+      // the other. Because the consumer always has a FULL round buffered locally,
+      // it keeps driving the MAIN socket (sending lam / corrections) throughout a
+      // background round-trip — so the peer never starves for main-socket data,
+      // its consumer keeps advancing, and its producer joins the cross-party
+      // round-trip. That, plus the flush in draw_vole_ before a block, prevents
+      // the "one party's full local buffer stalls the peer's peer-synchronous
+      // generation" deadlock. The cross-party round generation itself bounds the
+      // drift to <= 2 rounds, exactly the double buffer's capacity.
       auto *sv = static_cast<SilentFpVOLE<AuthValueFp> *>(vole);
-      const int64_t chunk = sv->chunk_size();
-      bg_batch_ = ((bg_batch_ + chunk - 1) / chunk) * chunk;   // chunk-aligned
-      pipe_ = std::make_unique<CorrelationPipe<AuthValueFp>>(/*N=*/4, bg_batch_);
+      bg_batch_ = sv->cots_per_round();   // one full round per buffer
+      pipe_ = std::make_unique<CorrelationPipe<AuthValueFp>>(/*N=*/2, bg_batch_);
       producer_ = std::thread([this] {
         auto *s = static_cast<SilentFpVOLE<AuthValueFp> *>(vole);
-        s->begin(s->cots_per_round());     // minimal prepay; rollovers on socket A
+        s->begin(s->cots_per_round());     // prepay round 0 (wire-free first fill)
         for (int i; (i = pipe_->acquire_free()) >= 0;) {
-          s->next_n(pipe_->slot[i].data(), bg_batch_);   // wire-free / rollover→A
+          s->next_n(pipe_->slot[i].data(), bg_batch_);   // fill one round (rollover→A)
           pipe_->publish();
         }
         s->end();                          // local (checks already done at begin)

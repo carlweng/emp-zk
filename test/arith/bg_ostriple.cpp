@@ -16,12 +16,11 @@ using namespace std;
 int party;
 
 void test_bg(BoolIO *io, BoolIO *vole_io, int party, int64_t N, int threads) {
-  // Upper bound on correlations consumed: the ctor pre-fills CHECK_SZ (8M) into
-  // the AND-gate buffer, plus ~2N for the a/b inputs, plus a few OPEs. Round up.
-  const int64_t expected_vole = (16LL << 20) + 4 * N;
-
+  // expected_vole is IGNORED in background mode (the producer streams on demand
+  // and finalizes at teardown) — pass 0 to prove no size hint is required; the
+  // earlier design would have aborted with "expected_vole too small".
   auto start = clock_start();
-  setup_zk_arith(io, party, threads, expected_vole, vole_io);   // background mode
+  setup_zk_arith(io, party, threads, /*expected_vole=*/0, vole_io);   // background
   cout << "  setup: " << time_from(start) / 1000.0 << " ms  (party " << party
        << ")" << endl;
 

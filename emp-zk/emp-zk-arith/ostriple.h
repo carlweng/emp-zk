@@ -62,7 +62,6 @@ public:
   std::unique_ptr<CorrelationPipe<AuthValueFp>> pipe_;
   std::thread producer_;
   int64_t bg_batch_ = 1 << 20;                      // correlations per pipe slot
-  int64_t total_slots_ = 0;                         // deterministic producer count
   int cur_slot_ = -1;                               // consumer FIFO reader state
   int64_t cur_off_ = 0;
 
@@ -103,8 +102,8 @@ public:
       if (cur_slot_ < 0) {
         cur_slot_ = pipe_->acquire_ready();
         cur_off_ = 0;
-        if (cur_slot_ < 0)
-          error("background sVOLE drained: expected_vole too small");
+        if (cur_slot_ < 0)   // producer only stops at teardown; never mid-proof
+          error("background sVOLE pipe closed during a draw (internal error)");
       }
       const int64_t take = std::min(n - done, bg_batch_ - cur_off_);
       memcpy(out + done, pipe_->slot[cur_slot_].data() + cur_off_,
@@ -184,9 +183,10 @@ public:
 
   // `vole_io` (optional): a SECOND socket, distinct from `io`. When provided,
   // the sVOLE runs on it in a background producer thread and this engine draws
-  // correlations from a pipe (see draw_vole_). Requires expected_vole > 0 (an
-  // upper bound on the correlations the proof will consume). nullptr = the
-  // default single-socket path.
+  // correlations from a pipe (see draw_vole_). The producer streams on demand
+  // and stops at teardown, so NO size hint is needed — `expected_vole` is
+  // ignored in this mode. nullptr = the default single-socket path (where
+  // expected_vole is still an optional whole-proof prepay hint).
   FpOSTriple(int party, BoolIO *io, int threads = 1, int64_t expected_vole = 0,
              BoolIO *vole_io = nullptr) {
     this->party = party;
@@ -209,28 +209,30 @@ public:
     s_scratch_.resize(CHECK_SZ);            // batched correction values (vectorized mul)
 
     if (bg_) {
-      // Background mode: producer thread owns the sVOLE + socket A; this thread
-      // never touches them. The producer emits a DETERMINISTIC total_slots_
-      // (equal on both parties, since expected_vole matches) then runs the final
-      // malicious check, so both sVOLE end()s rendezvous on socket A.
-      if (expected_vole <= 0)
-        error("background sVOLE requires expected_vole (upper bound on draws)");
+      // Background mode: the producer thread owns the sVOLE + socket A; this
+      // thread never touches them. It streams correlations ON DEMAND (throttled
+      // by the pipe) and stops when the consumer signals at teardown — no fixed
+      // count, so `expected_vole` is NOT needed here (ignored).
+      //
+      // Lockstep: both parties run the identical proof, hence consume
+      // identically, hence their producers stay in lockstep round-for-round.
+      // Mid-stream rollovers are mutual socket-A round-trips (they self-
+      // rendezvous), and SilentSvole::end() is local (its checks already ran at
+      // each begin()), so both end()s need no coordination. The pipe is kept
+      // small so the producer's look-ahead (wasted-if-unused production) stays a
+      // few batches — well under one sVOLE round.
       auto *sv = static_cast<SilentFpVOLE<AuthValueFp> *>(vole);
       const int64_t chunk = sv->chunk_size();
       bg_batch_ = ((bg_batch_ + chunk - 1) / chunk) * chunk;   // chunk-aligned
-      total_slots_ = (expected_vole + bg_batch_ - 1) / bg_batch_ + 2;
       pipe_ = std::make_unique<CorrelationPipe<AuthValueFp>>(/*N=*/4, bg_batch_);
       producer_ = std::thread([this] {
         auto *s = static_cast<SilentFpVOLE<AuthValueFp> *>(vole);
-        s->begin(s->cots_per_round());     // 1 round prepaid; rollovers on A
-        for (int64_t b = 0; b < total_slots_; ++b) {
-          int i = pipe_->acquire_free();
-          if (i < 0) break;
+        s->begin(s->cots_per_round());     // minimal prepay; rollovers on socket A
+        for (int i; (i = pipe_->acquire_free()) >= 0;) {
           s->next_n(pipe_->slot[i].data(), bg_batch_);   // wire-free / rollover→A
           pipe_->publish();
         }
-        pipe_->mark_producer_done();
-        s->end();                          // final malicious check on socket A
+        s->end();                          // local (checks already done at begin)
       });
     } else {
       // Default single-socket path. PREPAY the whole proof's VOLE when its size
@@ -257,13 +259,14 @@ public:
     auth_helper->flush();
     delete auth_helper;
     if (bg_) {
-      // Drain any produced-but-unconsumed slots so the producer completes its
-      // deterministic total_slots_ (equal on both parties) and reaches sv.end();
-      // do NOT finish() the pipe (that would cut the producer short → the two
-      // parties' end() checks would desync on socket A).
+      // Signal the producer to stop: both parties reach here after consuming
+      // identically, so their producers are at the same round; finish() wakes
+      // the producer's acquire_free() (returns -1 → it exits the loop and runs
+      // the local sv.end()). Any produced-but-unconsumed look-ahead is simply
+      // discarded (it lives in an already-checked round).
       if (cur_slot_ >= 0) { pipe_->release(); cur_slot_ = -1; }
-      for (int s; (s = pipe_->acquire_ready()) >= 0;) pipe_->release();
-      if (producer_.joinable()) producer_.join();   // producer ran sv.end()
+      pipe_->finish();
+      if (producer_.joinable()) producer_.join();
     } else {
       vole->end();      // close the persistent sVOLE session
     }

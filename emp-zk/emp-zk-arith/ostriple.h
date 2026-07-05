@@ -46,7 +46,8 @@ public:
   FpVOLE<AuthValueFp> *vole = nullptr;
   FpAuthHelper *auth_helper = nullptr;
 
-  int threads_ = 1;
+  int threads_ = 1;              // ostriple's pool (checks, vectorized mul)
+  int vole_threads_ = 1;         // sVOLE's pool (cGGM expand / produce)
   ThreadPool *pool_ = nullptr;   // null when threads_ <= 1
 
   int64_t CHECK_SZ = 8 * 1024 * 1024;
@@ -85,7 +86,7 @@ public:
       draw_vole_(buf, n);                       // from the background pipe
     } else {
       auto *sv = static_cast<SilentFpVOLE<AuthValueFp> *>(vole);
-      sv->next_chunks_parallel(buf, n / sv->chunk_size(), threads_);
+      sv->next_chunks_parallel(buf, n / sv->chunk_size(), vole_threads_);
     }
     if (prof_fills_done_++ == 0) prof_fill_setup_us += time_from(_t);
     else                         prof_fill_online_us += time_from(_t);
@@ -193,11 +194,18 @@ public:
   // and stops at teardown, so NO size hint is needed — `expected_vole` is
   // ignored in this mode. nullptr = the default single-socket path (where
   // expected_vole is still an optional whole-proof prepay hint).
+  // `vole_threads` sizes the sVOLE's own worker pool (cGGM expand / produce)
+  // INDEPENDENTLY of `threads` (which sizes ostriple's check / vectorized-mul
+  // pool). In background mode the two run concurrently, so splitting them lets
+  // you avoid 2x oversubscription (e.g. threads=cores/2, vole_threads=cores/2).
+  // vole_threads < 0 → same as `threads` (backward compatible).
   FpOSTriple(int party, BoolIO *io, int threads = 1, int64_t expected_vole = 0,
-             BoolIO *vole_io = nullptr) {
+             BoolIO *vole_io = nullptr, int vole_threads = -1) {
     this->party = party;
     this->io = io;
     this->threads_ = threads < 1 ? 1 : threads;
+    this->vole_threads_ =
+        (vole_threads < 0) ? this->threads_ : (vole_threads < 1 ? 1 : vole_threads);
     if (this->threads_ > 1) pool_ = new ThreadPool((size_t)this->threads_);
     bg_ = (vole_io != nullptr);
     bg_io_ = vole_io;
@@ -206,7 +214,7 @@ public:
     // The sVOLE lives on socket A (bg_io_) in background mode, else on `io`.
     vole = new SilentFpVOLE<AuthValueFp>(3 - party, bg_ ? bg_io_ : io,
                                          /*malicious=*/true, tuning::ferret_b13,
-                                         this->threads_);
+                                         this->vole_threads_);
     if (party == BOB) vole->set_delta((uint64_t)delta);
 
     andgate_out_buffer.resize(CHECK_SZ);

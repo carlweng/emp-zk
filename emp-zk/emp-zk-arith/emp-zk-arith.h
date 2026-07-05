@@ -22,15 +22,22 @@ using namespace std;
 // producer streams on demand and finalizes at teardown, so no size hint is
 // needed — expected_vole is ignored when vole_io is set. Does NOT support
 // bool<->arith conversion (use the single-socket overload for that).
+// `vole_threads` (optional): worker count for the sVOLE's own pool, separate
+// from `threads` (ostriple's checks / vectorized mul). In background mode the
+// two run concurrently, so pick e.g. threads=vole_threads=cores/2 to avoid 2x
+// oversubscription. vole_threads < 0 → same as `threads` (default).
 inline void setup_zk_arith(BoolIO *io, int party, int threads = 1,
-                           int64_t expected_vole = 0, BoolIO *vole_io = nullptr) {
+                           int64_t expected_vole = 0, BoolIO *vole_io = nullptr,
+                           int vole_threads = -1) {
   if (party == ALICE) {
-    ZKFpExec::zk_exec = new ZKFpExecPrv(io, threads, expected_vole, vole_io);
+    ZKFpExec::zk_exec =
+        new ZKFpExecPrv(io, threads, expected_vole, vole_io, vole_threads);
     FpPolyProof::fppolyproof =
         new FpPolyProof(ALICE, io,
                             ((ZKFpExecPrv *)(ZKFpExec::zk_exec))->ostriple);
   } else {
-    ZKFpExec::zk_exec = new ZKFpExecVer(io, threads, expected_vole, vole_io);
+    ZKFpExec::zk_exec =
+        new ZKFpExecVer(io, threads, expected_vole, vole_io, vole_threads);
     FpPolyProof::fppolyproof = new FpPolyProof(
         BOB, io, ((ZKFpExecVer *)(ZKFpExec::zk_exec))->ostriple);
   }

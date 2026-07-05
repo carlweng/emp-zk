@@ -15,12 +15,13 @@ using namespace std;
 
 int party;
 
-void test_bg(BoolIO *io, BoolIO *vole_io, int party, int64_t N, int threads) {
+void test_bg(BoolIO *io, BoolIO *vole_io, int party, int64_t N, int threads,
+             int vole_threads) {
   // expected_vole is IGNORED in background mode (the producer streams on demand
-  // and finalizes at teardown) — pass 0 to prove no size hint is required; the
-  // earlier design would have aborted with "expected_vole too small".
+  // and finalizes at teardown) — pass 0 to prove no size hint is required.
+  // threads sizes ostriple's pool; vole_threads sizes the sVOLE's (independent).
   auto start = clock_start();
-  setup_zk_arith(io, party, threads, /*expected_vole=*/0, vole_io);   // background
+  setup_zk_arith(io, party, threads, /*expected_vole=*/0, vole_io, vole_threads);
   cout << "  setup: " << time_from(start) / 1000.0 << " ms  (party " << party
        << ")" << endl;
 
@@ -55,6 +56,7 @@ int main(int argc, char **argv) {
   party = parse_party(argv);
   const int64_t N = int64_t{1} << ((argc > 2) ? atoi(argv[2]) : 16);
   const int threads = (argc > 3) ? std::max(1, atoi(argv[3])) : 1;
+  const int vole_threads = (argc > 4) ? atoi(argv[4]) : -1;   // -1 = same as threads
   const int p = peer_port();
 
   // TWO connections: main (P) and the dedicated sVOLE socket (P+1).
@@ -65,6 +67,6 @@ int main(int argc, char **argv) {
   BoolIO vole_io(vio.get(), party == ALICE);
 
   cout << endl << "----- background-sVOLE arith proof (two sockets) -----" << endl;
-  test_bg(&io, &vole_io, party, N, threads);
+  test_bg(&io, &vole_io, party, N, threads, vole_threads);
   return 0;
 }

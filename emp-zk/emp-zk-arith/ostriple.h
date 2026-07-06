@@ -240,11 +240,17 @@ public:
       auto *sv = static_cast<SilentFpVOLE<AuthValueFp> *>(vole);
       bg_batch_ = sv->cots_per_round();   // one full round per buffer
       pipe_ = std::make_unique<CorrelationPipe<AuthValueFp>>(/*N=*/2, bg_batch_);
-      producer_ = std::thread([this] {
+      const int64_t bg_chunks = bg_batch_ / sv->chunk_size();
+      producer_ = std::thread([this, bg_chunks] {
         auto *s = static_cast<SilentFpVOLE<AuthValueFp> *>(vole);
         s->begin(s->cots_per_round());     // prepay round 0 (wire-free first fill)
         for (int i; (i = pipe_->acquire_free()) >= 0;) {
-          s->next_n(pipe_->slot[i].data(), bg_batch_);   // fill one round (rollover→A)
+          // Fill one round with the THREADED produce (vole_threads_ workers) so
+          // vole_threads actually parallelizes the bulk cGGM+LPN produce, not
+          // just the rollover prepare. The cross-party rollover still happens on
+          // the producer thread inside ensure_tree_available_ (socket A); the
+          // parallel produce_range is wire-free.
+          s->next_chunks_parallel(pipe_->slot[i].data(), bg_chunks, vole_threads_);
           pipe_->publish();
         }
         s->end();                          // local (checks already done at begin)

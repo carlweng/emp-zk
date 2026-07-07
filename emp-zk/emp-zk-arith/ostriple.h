@@ -9,6 +9,27 @@
 #include <memory>
 #include <thread>
 #include <vector>
+// PRG-INDEPENDENT RLC coefficients (replaces the s^(i+1) power chain of uni_hash_coeff_gen):
+// each chi_i is a fresh uniform expanded from the seed by AES-PRG in fixed 4096-element
+// blocks keyed on (seed ^ const, block) -- RLC failure prob 1/PR instead of n/PR.
+#ifndef EMP_ZK_PRG_COEFF_GEN_
+#define EMP_ZK_PRG_COEFF_GEN_
+namespace emp {
+inline void prg_coeff_gen_zk(uint64_t *coeff, uint64_t seed, int64_t n) {
+  constexpr int64_t B = 4096;
+  std::vector<uint64_t> w((size_t)B);
+  for (int64_t b = 0; b * B < n; ++b) {
+    block sb = makeBlock(seed ^ 0x9e3779b97f4a7c15ULL, (uint64_t)b);
+    PRG prg(&sb);
+    prg.random_data(w.data(), (int)(B * 8));
+    const int64_t base = b * B;
+    const int64_t m = (n - base) < B ? (n - base) : B;
+    for (int64_t j = 0; j < m; ++j) coeff[base + j] = mod(w[(size_t)j]);
+  }
+}
+}  // namespace emp
+#endif
+
 
 namespace emp {
 using namespace std;
@@ -543,7 +564,7 @@ public:
 
     std::vector<uint64_t> chi(task_n);
     uint64_t seed = mod(LOW64(chi_seed[thr_idx]));
-    uni_hash_coeff_gen(chi.data(), seed, task_n);
+    prg_coeff_gen_zk(chi.data(), seed, task_n);   // independent chi
     if (party == ALICE) {
       uint64_t A0, A1;
       uint64_t U = 0, V = 0;

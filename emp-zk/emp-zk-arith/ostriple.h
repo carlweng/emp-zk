@@ -344,11 +344,16 @@ public:
     std::vector<uint64_t> lam(len);
     draw_vole_((AuthValueFp *)label, len);
 
-    for (int64_t i = 0; i < len; ++i) {
-      lam[i] = PR - w[i];
-      lam[i] = add_mod(VAL(label[i]), lam[i]);
-      label[i] = MAKE_AUTH(w[i], MAC(label[i]));
-    }
+    // Per-element masking compute is independent (disjoint label[i]/lam[i]) →
+    // split across the pool. Serial fallback for small len (see run_parallel_).
+    run_parallel_(
+        [&](int64_t lo, int64_t hi) {
+          for (int64_t i = lo; i < hi; ++i) {
+            lam[i] = add_mod(VAL(label[i]), PR - w[i]);
+            label[i] = MAKE_AUTH(w[i], MAC(label[i]));
+          }
+        },
+        len);
     io->send_data(lam.data(), len * sizeof(uint64_t));
   }
 
@@ -371,10 +376,15 @@ public:
 
     io->recv_data(lam.data(), len * sizeof(uint64_t));
 
-    for (int64_t i = 0; i < len; ++i) {
-      uint64_t delta_lam = mult_mod(lam[i], (uint64_t)delta);
-      label[i] = MAKE_AUTH(0, add_mod(MAC(label[i]), delta_lam));
-    }
+    // Per-element key correction (one mult_mod each) → split across the pool.
+    run_parallel_(
+        [&](int64_t lo, int64_t hi) {
+          for (int64_t i = lo; i < hi; ++i) {
+            uint64_t delta_lam = mult_mod(lam[i], (uint64_t)delta);
+            label[i] = MAKE_AUTH(0, add_mod(MAC(label[i]), delta_lam));
+          }
+        },
+        len);
   }
 
   /*

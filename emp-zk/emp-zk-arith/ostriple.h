@@ -67,6 +67,7 @@ public:
   FpVOLE<AuthValueFp> *vole = nullptr;
   FpAuthHelper *auth_helper = nullptr;
 
+  static constexpr int64_t kFeedParMin = ((int64_t)1 << 20) - 1;  // thread feed() at >= 1M elements
   int threads_ = 1;              // ostriple's pool (checks, vectorized mul)
   int vole_threads_ = 1;         // sVOLE's pool (cGGM expand / produce)
   ThreadPool *pool_ = nullptr;   // null when threads_ <= 1
@@ -260,7 +261,12 @@ public:
       // drift to <= 2 rounds, exactly the double buffer's capacity.
       auto *sv = static_cast<SilentFpVOLE<AuthValueFp> *>(vole);
       bg_batch_ = sv->cots_per_round();   // one full round per buffer
-      pipe_ = std::make_unique<CorrelationPipe<AuthValueFp>>(/*N=*/2, bg_batch_);
+      // BG_SLOTS (default 4): sVOLE-side banked rounds. 2 slots = only ~1 FINISHED round
+      // banked (the other is mid-production), so a >15M refill (LogUp 16.8M chunks) waits
+      // on the in-flight round. 4 = one draining + one filling + TWO fully banked (~31M),
+      // so any single refill is served from finished buffers. +249 MB per extra slot.
+      const int bg_slots = getenv("BG_SLOTS") ? atoi(getenv("BG_SLOTS")) : 4;
+      pipe_ = std::make_unique<CorrelationPipe<AuthValueFp>>(bg_slots, bg_batch_);
       const int64_t bg_chunks = bg_batch_ / sv->chunk_size();
       producer_ = std::thread([this, bg_chunks] {
         auto *s = static_cast<SilentFpVOLE<AuthValueFp> *>(vole);
@@ -346,14 +352,20 @@ public:
 
     // Per-element masking compute is independent (disjoint label[i]/lam[i]) →
     // split across the pool. Serial fallback for small len (see run_parallel_).
-    run_parallel_(
-        [&](int64_t lo, int64_t hi) {
-          for (int64_t i = lo; i < hi; ++i) {
+    if (len <= kFeedParMin) {   // serial fast path: dispatch loses on small/medium feeds
+      for (int64_t i = 0; i < len; ++i) {
+        lam[i] = add_mod(VAL(label[i]), PR - w[i]);
+        label[i] = MAKE_AUTH(w[i], MAC(label[i]));
+      }
+    } else
+      run_parallel_(
+          [&](int64_t lo, int64_t hi) {
+            for (int64_t i = lo; i < hi; ++i) {
             lam[i] = add_mod(VAL(label[i]), PR - w[i]);
             label[i] = MAKE_AUTH(w[i], MAC(label[i]));
-          }
-        },
-        len);
+            }
+          },
+          len);
     io->send_data(lam.data(), len * sizeof(uint64_t));
   }
 
@@ -377,14 +389,20 @@ public:
     io->recv_data(lam.data(), len * sizeof(uint64_t));
 
     // Per-element key correction (one mult_mod each) → split across the pool.
-    run_parallel_(
-        [&](int64_t lo, int64_t hi) {
-          for (int64_t i = lo; i < hi; ++i) {
+    if (len <= kFeedParMin) {   // serial fast path: dispatch loses on small/medium feeds
+      for (int64_t i = 0; i < len; ++i) {
+        uint64_t delta_lam = mult_mod(lam[i], (uint64_t)delta);
+        label[i] = MAKE_AUTH(0, add_mod(MAC(label[i]), delta_lam));
+      }
+    } else
+      run_parallel_(
+          [&](int64_t lo, int64_t hi) {
+            for (int64_t i = lo; i < hi; ++i) {
             uint64_t delta_lam = mult_mod(lam[i], (uint64_t)delta);
             label[i] = MAKE_AUTH(0, add_mod(MAC(label[i]), delta_lam));
-          }
-        },
-        len);
+            }
+          },
+          len);
   }
 
   /*

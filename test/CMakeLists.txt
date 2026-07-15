@@ -32,6 +32,9 @@ add_test_case_with_run(bool inner_prdt)
 # ZK SHA-256 on the IR-replay model: the sha256_256 builtin replayed over the ZK
 # context and validated against a ClearCtx replay.
 add_test_case_with_run(bool sha256)
+# Background-Ferret engine (two sockets) + threaded feeds / vectorized AND /
+# PolyProof sums — the bool analogue of arith_bg_ostriple.
+add_test_case_with_run(bool bg_engine)
 # (input/circuit/f2k/memory _scalability are build-only benchmarks — see ../bench)
 
 # Arithmetic ZK

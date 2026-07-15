@@ -10,8 +10,9 @@ using namespace std;
 
 class ZKBoolProver : public ZKBoolBase {
 public:
-  ZKBoolProver(BoolIO *io, int64_t expected_cots = 0, int n_threads = 1)
-      : ZKBoolBase(ALICE, io, expected_cots, n_threads) {
+  ZKBoolProver(BoolIO *io, int64_t expected_cots = 0, int n_threads = 1,
+               BoolIO *cot_io = nullptr, int cot_threads = -1)
+      : ZKBoolBase(ALICE, io, expected_cots, n_threads, cot_io, cot_threads) {
     // PUBLIC label for bit 1 has its LSB set so getLSB() reads back the
     // cleartext value. (Verifier instead xors zdelta into pub_label[1].)
     pub_label[1] = pub_label[1] ^ makeBlock(0, 1);
@@ -47,6 +48,12 @@ public:
     return auth_compute_and(l, r);
   }
 
+  void and_block(block *out, const block *l, const block *r,
+                 int64_t len) override {
+    gid += len;
+    auth_compute_and(out, l, r, len);
+  }
+
   void feed_bits(block *out, int from_party, const bool *in, size_t n) override {
     // Guard the raw primitive too (engine() is public): an invalid owner would
     // leave the verifier on the other branch and desync the transcript.
@@ -72,14 +79,31 @@ public:
 
 private:
   // Authenticated-bit input: receive a fresh COT pair, embed the cleartext
-  // bit in the LSB, send the masking flip to BOB.
+  // bit in the LSB, send the masking flip to BOB. Above kFeedParMin the
+  // per-bit masking compute splits across the engine pool (disjoint auth[i]);
+  // the masking bits still ship through the same ordered send_bit stream, so
+  // the wire transcript is byte-identical to the serial path.
   void authenticated_bits_input(block *auth, const bool *in, int64_t len) {
     draw_cot_(auth, len);
-    for (int64_t i = 0; i < len; ++i) {
-      bool buff = getLSB(auth[i]) ^ in[i];
-      auth[i] = with_lsb(auth[i], in[i]);
-      io->send_bit(buff);
+    if (len <= kFeedParMin) {   // serial fast path: dispatch loses on small/medium feeds
+      for (int64_t i = 0; i < len; ++i) {
+        bool buff = getLSB(auth[i]) ^ in[i];
+        auth[i] = with_lsb(auth[i], in[i]);
+        io->send_bit(buff);
+      }
+      return;
     }
+    std::vector<uint8_t> mask((size_t)len);
+    run_parallel_(
+        [&](int64_t lo, int64_t hi) {
+          for (int64_t i = lo; i < hi; ++i) {
+            mask[(size_t)i] = (uint8_t)(getLSB(auth[i]) ^ in[i]);
+            auth[i] = with_lsb(auth[i], in[i]);
+          }
+        },
+        len);
+    for (int64_t i = 0; i < len; ++i)
+      io->send_bit(mask[(size_t)i] != 0);
   }
 
   // Authenticated AND: compute s = a·b on cleartext, mask the pre-drawn COT
@@ -105,6 +129,48 @@ private:
     andgate_out_buffer[check_cnt] = auth;          // output MAC for the check
     check_cnt++;
     return auth;
+  }
+
+  // Vectorized AND (batched + threaded), the bool analogue of arith's
+  // auth_compute_mul_send: draw the wave's fresh COTs in one bulk pull, split
+  // the per-gate masking compute across the engine pool (each gate writes its
+  // own out / triple-buffer / and_bits_ slot), then ship the masking bits
+  // through the ordered send_bit stream. Wire bytes and check folds are
+  // byte-identical to `len` scalar auth_compute_and calls. Crosses CHECK_SZ
+  // boundaries safely (runs the batch check inline).
+  void auth_compute_and(block *out, const block *a, const block *b,
+                        int64_t n) {
+    int64_t done = 0;
+    while (done < n) {
+      if (check_cnt == CHECK_SZ) {
+        andgate_correctness_check_manage();
+        check_cnt = 0;
+      }
+      const int64_t take = std::min<int64_t>(CHECK_SZ - check_cnt, n - done);
+      const int64_t base = check_cnt;
+      draw_cot_(out + done, take);                 // fresh COTs, in stream order
+      block *lbuf = andgate_left_buffer.data() + base;
+      block *rbuf = andgate_right_buffer.data() + base;
+      block *obuf = andgate_out_buffer.data() + base;
+      run_parallel_(
+          [&](int64_t lo, int64_t hi) {
+            for (int64_t i = lo; i < hi; ++i) {
+              const block l = a[done + i], r = b[done + i];
+              lbuf[i] = l;
+              rbuf[i] = r;
+              const bool s = getLSB(l) && getLSB(r);
+              and_bits_[(size_t)(base + i)] =
+                  (uint8_t)(s ^ getLSB(out[done + i]));
+              obuf[i] = with_lsb(out[done + i], s);
+              out[done + i] = obuf[i];
+            }
+          },
+          take);
+      for (int64_t i = 0; i < take; ++i)           // ordered, wire-identical
+        io->send_bit(and_bits_[(size_t)(base + i)] != 0);
+      check_cnt += take;
+      done += take;
+    }
   }
 
   // Output reveal: send each cleartext bit, then drop the MACs into the

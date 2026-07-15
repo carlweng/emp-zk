@@ -3,8 +3,10 @@
 
 // The emp-zk-bool proof engine — a standalone class (no emp-tool Backend
 // inheritance, no global pointer) wrapped by ZKBoolContext (zk_context.h) and
-// owned by ZKBoolSession (zk_session.h). Single-threaded; one BoolIO* drives both
-// the gate-level bool stream and Ferret's OT-extension data.
+// owned by ZKBoolSession (zk_session.h). By default one BoolIO* drives both
+// the gate-level bool stream and Ferret's OT-extension data; with a second
+// socket (`cot_io`) the Ferret runs on its own connection in a background
+// producer thread (the bool analogue of arith's background sVOLE).
 //
 // Layout:
 //   - zk_bool_base.h     — ZKBoolBase: shared state, the typed gate / I-O surface
@@ -28,8 +30,10 @@
 #include "emp-zk/emp-zk-bool/zk_wire.h"
 #include "emp-zk/emp-zk-bool/bool_io.h"
 #include "emp-zk/emp-zk-bool/polynomial.h"
+#include "emp-zk/emp-zk-arith/correlation_pipe.h"  // protocol-agnostic SPSC ring
 #include <future>
 #include <memory>
+#include <thread>
 #include <vector>
 
 namespace emp {
@@ -62,6 +66,14 @@ public:
   std::vector<block> andgate_out_buffer;
   std::vector<block> andgate_left_buffer;
   std::vector<block> andgate_right_buffer;
+  // Masking-bit scratch for one vectorized-AND wave (<= CHECK_SZ entries):
+  // the threaded per-gate compute writes here, the (ordered) bit send/recv
+  // loop reads it. uint8_t, not vector<bool>, so workers write disjoint bytes.
+  std::vector<uint8_t> and_bits_;
+
+  // Below this per-call length the per-bit loops are cheaper serial than the
+  // pool dispatch (the bool analogue of arith's feed threshold).
+  static constexpr int64_t kFeedParMin = ((int64_t)1 << 20) - 1;
 
   // ---- f2k wire support (lazily initialised on first f2k op) ----------
   // The second wire type: authenticated F(2^128) values, sharing this
@@ -90,11 +102,39 @@ public:
   SilentFerret *ferret = nullptr;
   PolyProof  *polyproof = nullptr;
 
-  // Worker count + pool for the parallel paths: SilentFerret's begin-time
-  // expansion, the f2k VOLE, and the AND-gate batch check. 1 = single-threaded
-  // (pool_ null), wire-identical to the prior path.
+  // Worker counts + pool for the parallel paths. `n_threads_` sizes the
+  // ENGINE pool (AND-gate batch check, vectorized AND, threaded feeds,
+  // PolyProof sums); `cot_threads_` INDEPENDENTLY sizes the correlation
+  // producers (SilentFerret / f2k-VOLE begin-time expansion and the bulk
+  // wire-free produce). In background mode the two run concurrently, so
+  // splitting them avoids 2x oversubscription (e.g. threads=cores/2,
+  // cot_threads=cores/2). cot_threads < 0 → same as n_threads (backward
+  // compatible). 1 = single-threaded (pool_ null), wire-identical.
   int n_threads_ = 1;
+  int cot_threads_ = 1;
   ThreadPool *pool_ = nullptr;
+
+  // Split [0, cnt) across the worker pool; the last range runs on this thread.
+  // Serial (no pool work) when n_threads_<=1 or the batch is smaller than the
+  // worker count. The functor is joined before return, so capturing it by
+  // reference in the tasks is safe.
+  template <class F>
+  void run_parallel_(F &&work, int64_t cnt) {
+    if (n_threads_ <= 1 || pool_ == nullptr || cnt < (int64_t)n_threads_) {
+      work((int64_t)0, cnt);
+      return;
+    }
+    const int64_t per = cnt / n_threads_;
+    std::vector<std::future<void>> fut;
+    int64_t start = 0;
+    for (int t = 0; t < n_threads_ - 1; ++t) {
+      const int64_t lo = start, hi = start + per;
+      fut.push_back(pool_->enqueue([&work, lo, hi]() { work(lo, hi); }));
+      start += per;
+    }
+    work(start, cnt);
+    for (auto &f : fut) f.get();
+  }
 
   // ---- Optional phase profiling (EMP_PROFILE=1), printed at teardown ----
   double prof_ferret_begin_us = 0.0;  // SilentFerret begin() prepay (COT setup)
@@ -106,19 +146,49 @@ public:
   // wire-free *threaded* produce (next_chunks_parallel) instead of the serial
   // per-gate next_n(). Because it serves the same deterministic COT stream in
   // the same order, consumption is byte-identical to the old per-gate path
-  // (at n_threads_==1 produce is the same serial next(); at >1 produce_range
+  // (at cot_threads_==1 produce is the same serial next(); at >1 produce_range
   // yields the same COTs), so the wire transcript is unchanged.
   std::vector<block> cot_buf_;
   int64_t cot_pos_ = 0, cot_have_ = 0;
 
+  // ---- Background COT producer (the bool analogue of arith's bg sVOLE) ----
+  // With a second socket (cot_io) the SilentFerret runs on its OWN connection
+  // in a dedicated producer thread, streaming COTs into a CorrelationPipe;
+  // this thread never touches the Ferret / socket A after construction, and
+  // every draw is served FIFO from the pipe instead of cot_buf_.
+  bool bg_ = false;
+  std::unique_ptr<CorrelationPipe<block>> pipe_;
+  std::thread producer_;
+  int64_t bg_batch_ = 1;              // COTs per pipe slot (one Ferret round)
+  int cur_slot_ = -1;                 // pipe slot being drained (-1 = none)
+  int64_t cur_off_ = 0;               // consume offset within cur_slot_
+
   // One fresh COT (hot path: one per AND gate).
   block draw_one_cot_() {
+    if (bg_) {
+      if (cur_slot_ < 0) bg_next_slot_();
+      block r = pipe_->slot[cur_slot_][(size_t)cur_off_++];
+      if (cur_off_ == bg_batch_) { pipe_->release(); cur_slot_ = -1; }
+      return r;
+    }
     if (cot_pos_ == cot_have_) cot_refill_();
     return cot_buf_[cot_pos_++];
   }
   // n fresh COTs, FIFO from the same stream (inputs / OPE / PolyProof).
   void draw_cot_(block *out, int64_t n) {
     int64_t done = 0;
+    if (bg_) {
+      while (done < n) {
+        if (cur_slot_ < 0) bg_next_slot_();
+        const int64_t take = std::min(n - done, bg_batch_ - cur_off_);
+        memcpy(out + done, pipe_->slot[cur_slot_].data() + cur_off_,
+               (size_t)take * sizeof(block));
+        cur_off_ += take;
+        done += take;
+        if (cur_off_ == bg_batch_) { pipe_->release(); cur_slot_ = -1; }
+      }
+      return;
+    }
     while (done < n) {
       if (cot_pos_ == cot_have_) cot_refill_();
       const int64_t take = std::min(n - done, cot_have_ - cot_pos_);
@@ -130,9 +200,21 @@ public:
   void cot_refill_() {
     const int64_t chunk = ferret->chunk_size();
     const int64_t nch = (int64_t)cot_buf_.size() / chunk;
-    ferret->next_chunks_parallel(cot_buf_.data(), nch, n_threads_);
+    ferret->next_chunks_parallel(cot_buf_.data(), nch, cot_threads_);
     cot_pos_ = 0;
     cot_have_ = nch * chunk;
+  }
+  void bg_next_slot_() {
+    // About to (possibly) block waiting for the producer to fill the next
+    // round-buffer, whose fill is a CROSS-PARTY Ferret round-trip. FLUSH the
+    // main socket first so the peer receives everything up to our position,
+    // finishes its round, and its producer joins that round-trip — otherwise
+    // an unflushed tail here would reintroduce the cross-party deadlock.
+    io->flush();
+    cur_slot_ = pipe_->acquire_ready();
+    cur_off_ = 0;
+    if (cur_slot_ < 0)   // producer only stops at teardown; never mid-proof
+      error("background COT pipe closed during a draw (internal error)");
   }
 
   // Output-MAC accumulator. Hash + scratch buffer; finalize at teardown.
@@ -147,29 +229,31 @@ public:
   // whole proof's COT consumption is wire-free. 0 (the default) uses the
   // per-round streaming begin() — safe for an unknown circuit size, at the cost
   // of one COT-correction burst per ~15M-COT round.
-  ZKBoolBase(int p, BoolIO *io_, int64_t expected_cots = 0, int n_threads = 1)
+  //
+  // `cot_io` (optional): a SECOND socket, distinct from `io`. When provided,
+  // the SilentFerret runs on it in a background producer thread and this
+  // engine draws COTs from a pipe (see draw_cot_). The producer streams on
+  // demand and stops at teardown, so NO size hint is needed — `expected_cots`
+  // is ignored in this mode. nullptr = the default single-socket path.
+  // `cot_threads` sizes the Ferret's own worker pool (cGGM expand / produce)
+  // INDEPENDENTLY of `n_threads` (the engine's check / vectorized-gate pool);
+  // cot_threads < 0 → same as n_threads (backward compatible).
+  ZKBoolBase(int p, BoolIO *io_, int64_t expected_cots = 0, int n_threads = 1,
+             BoolIO *cot_io = nullptr, int cot_threads = -1)
       : party(p), io(io_), n_threads_(n_threads < 1 ? 1 : n_threads) {
+    cot_threads_ =
+        (cot_threads < 0) ? n_threads_ : (cot_threads < 1 ? 1 : cot_threads);
     if (n_threads_ > 1) pool_ = new ThreadPool((size_t)n_threads_);
+    bg_ = (cot_io != nullptr);
     // BoolIO inherits IOChannel publicly with the IOChannel subobject at
     // offset 0, so the cast is a no-op at runtime. Ferret now takes a
     // single IOChannel (post-unification with the other OT extensions).
-    // n_threads sizes SilentFerret's begin()-time expansion pool.
-    IOChannel *iochan = reinterpret_cast<IOChannel *>(io_);
+    // cot_threads sizes SilentFerret's begin()-time expansion pool. The
+    // Ferret lives on socket A (cot_io) in background mode, else on `io`.
+    IOChannel *iochan = reinterpret_cast<IOChannel *>(bg_ ? cot_io : io_);
     ferret = new SilentFerret(3 - p, iochan, /*malicious=*/true,
-                              tuning::ferret_b13, nullptr, n_threads_);
+                              tuning::ferret_b13, nullptr, cot_threads_);
     delta = ferret->Delta;           // Δ sampled in Ferret's ctor
-    // One persistent SilentFerret streaming session for the whole proof. COTs
-    // are drawn lazily, one per AND gate, straight from the streaming interface
-    // (its leftover buffer); no separate pre-drawn COT pool is kept. Closed in
-    // the destructor.
-    auto _tferret = clock_start();
-    if (expected_cots > 0) ferret->begin(expected_cots);
-    else                   ferret->begin();
-    prof_ferret_begin_us += time_from(_tferret);
-
-    // Threaded COT prefetch buffer (gap #3): 128 chunks (~1M COTs) per refill,
-    // produced wire-free across n_threads_ via SilentFerret::next_chunks_parallel.
-    cot_buf_.resize((size_t)(128 * ferret->chunk_size()));
 
     // Buffers for the QuickSilver AND-gate batch check (left/right inputs +
     // output MAC, folded once per CHECK_SZ gates with an FS-derived chi). The
@@ -178,6 +262,7 @@ public:
     andgate_out_buffer.resize(CHECK_SZ);
     andgate_left_buffer.resize(CHECK_SZ);
     andgate_right_buffer.resize(CHECK_SZ);
+    and_bits_.resize(CHECK_SZ);      // batched masking bits (vectorized AND)
 
     // Public-input label table — known to both parties by design.
     // PRP(1) key, distinct from ZKFpExec's PRP(0), so the two public
@@ -193,13 +278,76 @@ public:
     polyproof = new PolyProof(p, io_, ferret);
     // Route PolyProof's COT draws through the same FIFO buffer so the single
     // shared COT stream stays in order (otherwise its next_n would desync the
-    // cursor the prefetch buffer has already advanced).
+    // cursor the prefetch buffer has already advanced). Share the engine pool
+    // so its accumulate / batch-check sums split across the same workers.
     polyproof->draw_cot = [this](block *o, int64_t n) { draw_cot_(o, n); };
+    polyproof->pool = pool_;
+    polyproof->threads = n_threads_;
+
+    if (bg_) {
+      // Background mode: the producer thread owns the Ferret + socket A; this
+      // thread never touches them again. `expected_cots` is not needed
+      // (ignored).
+      //
+      // ROUND-SIZED ring (deadlock-free, mirroring arith's bg sVOLE). Each
+      // pipe slot holds exactly one Ferret round (cots_per_round); the
+      // producer fills one (a cross-party round-trip on socket A) while the
+      // consumer drains another. Because the consumer always has a FULL round
+      // buffered locally, it keeps driving the MAIN socket (gate bits /
+      // corrections) throughout a background round-trip — so the peer never
+      // starves for main-socket data, its consumer keeps advancing, and its
+      // producer joins the cross-party round-trip. That, plus the flush in
+      // bg_next_slot_ before a block, prevents the "one party's full local
+      // buffer stalls the peer's peer-synchronous generation" deadlock.
+      // BG_SLOTS (default 4): 2 = only ~1 FINISHED round banked (the other is
+      // mid-production); 4 = one draining + one filling + two fully banked.
+      // ~250 MB per extra slot at the b13 parameter.
+      bg_batch_ = ferret->cots_per_round();   // one full round per buffer
+      const int bg_slots = getenv("BG_SLOTS") ? atoi(getenv("BG_SLOTS")) : 4;
+      pipe_ = std::make_unique<CorrelationPipe<block>>(bg_slots, bg_batch_);
+      const int64_t bg_chunks = bg_batch_ / ferret->chunk_size();
+      producer_ = std::thread([this, bg_chunks] {
+        ferret->begin(ferret->cots_per_round()); // prepay round 0 (wire-free first fill)
+        for (int i; (i = pipe_->acquire_free()) >= 0;) {
+          // Fill one round with the THREADED produce (cot_threads_ workers) so
+          // cot_threads actually parallelizes the bulk cGGM+LPN produce, not
+          // just the rollover prepare. The cross-party rollover still happens
+          // on the producer thread inside ensure_tree_available_ (socket A);
+          // the parallel produce_range is wire-free.
+          ferret->next_chunks_parallel(pipe_->slot[i].data(), bg_chunks,
+                                       cot_threads_);
+          pipe_->publish();
+        }
+        ferret->end();                 // local (checks already done at begin)
+      });
+    } else {
+      // Default single-socket path: one persistent SilentFerret streaming
+      // session for the whole proof, closed in the destructor.
+      auto _tferret = clock_start();
+      if (expected_cots > 0) ferret->begin(expected_cots);
+      else                   ferret->begin();
+      prof_ferret_begin_us += time_from(_tferret);
+
+      // Threaded COT prefetch buffer (gap #3): 128 chunks (~1M COTs) per refill,
+      // produced wire-free across cot_threads_ via SilentFerret::next_chunks_parallel.
+      cot_buf_.resize((size_t)(128 * ferret->chunk_size()));
+    }
   }
 
   virtual ~ZKBoolBase() {
-    delete polyproof;   // PolyProof::batch_check draws COTs via next_n — session still open
-    ferret->end();      // close the persistent streaming session (final round + chi-fold check)
+    delete polyproof;   // PolyProof::batch_check draws COTs — stream still open
+    if (bg_) {
+      // Signal the producer to stop: both parties reach here after consuming
+      // identically, so their producers are at the same round; finish() wakes
+      // the producer's acquire_free() (returns -1 → it exits the loop and
+      // runs the local ferret->end()). Any produced-but-unconsumed look-ahead
+      // is simply discarded (it lives in an already-checked round).
+      if (cur_slot_ >= 0) { pipe_->release(); cur_slot_ = -1; }
+      pipe_->finish();
+      if (producer_.joinable()) producer_.join();
+    } else {
+      ferret->end();    // close the persistent streaming session (final round + chi-fold check)
+    }
     delete ferret;
     // f2k machinery (only allocated if some f2k op ran). The leftover
     // f2k batch check already happened in the subclass dtor — it needs
@@ -240,6 +388,17 @@ public:
 
   // Party-specific gates / I-O, implemented by the prover / verifier subclass.
   virtual block and_block(block l, block r) = 0;
+  // Vectorized AND: `len` INDEPENDENT gates out_i = l_i & r_i in one batched,
+  // threaded call (no l_i/r_i may depend on another out_j of the same call).
+  // `out` must NOT alias l/r: the wave's fresh COTs are drawn into `out`
+  // before the inputs are read (the scalar gate has no such restriction).
+  // Both parties must call it in lockstep with equal `len` — as with every
+  // engine op — since the wave's draws precede the wave's gate bits. Under
+  // matching calls the per-gate compute splits across the engine pool, the
+  // masking bits ship through the same ordered send_bit stream, and the wire
+  // bytes + batch-check folds are byte-identical to the scalar version.
+  virtual void and_block(block *out, const block *l, const block *r,
+                         int64_t len) = 0;
   virtual block not_block(block in) = 0;
   virtual void feed_bits(block *out, int from_party, const bool *in, size_t n) = 0;
   virtual void reveal_bits(bool *out, int to_party, const block *in, size_t n) = 0;
@@ -256,7 +415,7 @@ public:
     feed_bits(out, owner, b.get(), (size_t)width);
   }
 
-  // ---- AND-gate batch correctness check (single-threaded) ------------
+  // ---- AND-gate batch correctness check (threaded reduction) ---------
   //
   // Derives a Fiat-Shamir seed from the io hash, runs the role-specific
   // reduction over the check_cnt buffered triples in one pass, then
@@ -325,11 +484,13 @@ public:
   // own inner Ferret keeps its wire bytes separate from the bit Ferret.
   void f2k_init() {
     if (f2k_ready) return;
-    // SilentF2kVOLE is-a F2kVOLE (Svole base); the n_threads pool threads its
-    // begin-time expansion. run()/set_delta dispatch virtually through the base
-    // pointer, so the swap is transparent to the rest of the f2k machinery.
+    // SilentF2kVOLE is-a F2kVOLE (Svole base); cot_threads_ sizes its
+    // begin-time expansion pool (it is a correlation producer, so it shares
+    // the Ferret's budget, not the engine pool's). run()/set_delta dispatch
+    // virtually through the base pointer, so the swap is transparent to the
+    // rest of the f2k machinery.
     f2k_vole = new SilentF2kVOLE<AuthValueF2k>(party, io, /*malicious=*/true,
-                                               tuning::ferret_b10, n_threads_);
+                                               tuning::ferret_b10, cot_threads_);
     if (party == BOB) f2k_vole->set_delta(ferret->Delta);
     f2k_buffer_sz = f2k_vole->chunk_aligned_buf_sz();
     f2k_auth_buffer.resize(f2k_buffer_sz);

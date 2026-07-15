@@ -53,14 +53,27 @@ public:
     // ship once at setup, leaving the whole proof's COT consumption wire-free.
     // 0 (default) uses per-round streaming, safe for an unknown circuit size.
     // `n_threads` (optional, default 1) sizes the engine's worker pool: the
-    // SilentFerret / f2k-VOLE begin-time expansion and the AND-gate batch check.
+    // AND-gate batch check, the vectorized AND, threaded feeds, and the
+    // PolyProof sums.
+    // `cot_io` (optional): a SECOND caller-owned socket. When provided, the
+    // SilentFerret runs on it in a background producer thread and the engine
+    // draws COTs from a pipe while its own traffic stays on `io` (the bool
+    // analogue of arith's background sVOLE); `expected_cots` is then ignored.
+    // `cot_threads` (optional) sizes the COT producer's own worker pool
+    // (Ferret / f2k-VOLE expansion + bulk produce) independently of
+    // `n_threads`, so the two pools don't oversubscribe cores in background
+    // mode; -1 (default) = same as n_threads.
     ZKBoolSession(BoolIO* io, int party, int64_t expected_cots = 0,
-                  int n_threads = 1) {
+                  int n_threads = 1, BoolIO* cot_io = nullptr,
+                  int cot_threads = -1) {
         if (party != ALICE && party != BOB)
             error("ZKBoolSession: party must be ALICE or BOB");
         if (io == nullptr) error("ZKBoolSession: io channel must not be null");
-        if (party == ALICE) eng_ = new ZKBoolProver(io, expected_cots, n_threads);
-        else                eng_ = new ZKBoolVerifier(io, expected_cots, n_threads);
+        if (cot_io == io)  error("ZKBoolSession: cot_io must be a distinct socket");
+        if (party == ALICE) eng_ = new ZKBoolProver(io, expected_cots, n_threads,
+                                                    cot_io, cot_threads);
+        else                eng_ = new ZKBoolVerifier(io, expected_cots, n_threads,
+                                                      cot_io, cot_threads);
         ctx_ = ZKBoolContext(eng_);
     }
     ~ZKBoolSession() { finalize(); }

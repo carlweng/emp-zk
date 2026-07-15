@@ -15,8 +15,9 @@ public:
   // specific because NOT folds it on the wire.
   block zdelta;
 
-  ZKBoolVerifier(BoolIO *io, int64_t expected_cots = 0, int n_threads = 1)
-      : ZKBoolBase(BOB, io, expected_cots, n_threads) {
+  ZKBoolVerifier(BoolIO *io, int64_t expected_cots = 0, int n_threads = 1,
+                 BoolIO *cot_io = nullptr, int cot_threads = -1)
+      : ZKBoolBase(BOB, io, expected_cots, n_threads, cot_io, cot_threads) {
     zdelta = delta ^ makeBlock(0, 1);
     // PUBLIC label for bit 1: xor zdelta in so the wire MAC is right
     // even though there's no cleartext flip.
@@ -53,6 +54,12 @@ public:
     return auth_compute_and(l, r);
   }
 
+  void and_block(block *out, const block *l, const block *r,
+                 int64_t len) override {
+    gid += len;
+    auth_compute_and(out, l, r, len);
+  }
+
   void feed_bits(block *out, int from_party, const bool *in, size_t n) override {
     // Guard the raw primitive too (engine() is public): an invalid owner would
     // leave the prover on the other branch and desync the transcript.
@@ -75,13 +82,28 @@ private:
   // ---- BOB-side OSTriple methods ----------------------------------------
 
   // Authenticated-bit input: receive the prover's masking flips, fold them
-  // into the COT keys to recover the per-bit MAC structure.
+  // into the COT keys to recover the per-bit MAC structure. Above kFeedParMin
+  // the flips are received in one ordered pass and the per-bit key correction
+  // splits across the engine pool (disjoint auth[i]) — same wire bytes as the
+  // serial path, mirroring the prover's threaded masking compute.
   void authenticated_bits_input(block *auth, const bool *in, int64_t len) {
     draw_cot_(auth, len);
-    for (int64_t i = 0; i < len; ++i) {
-      bool buff = io->recv_bit();
-      auth[i] = clear_lsb(xor_delta_if(auth[i], buff));
+    if (len <= kFeedParMin) {   // serial fast path: dispatch loses on small/medium feeds
+      for (int64_t i = 0; i < len; ++i) {
+        bool buff = io->recv_bit();
+        auth[i] = clear_lsb(xor_delta_if(auth[i], buff));
+      }
+      return;
     }
+    std::vector<uint8_t> mask((size_t)len);
+    for (int64_t i = 0; i < len; ++i)
+      mask[(size_t)i] = io->recv_bit() ? 1 : 0;
+    run_parallel_(
+        [&](int64_t lo, int64_t hi) {
+          for (int64_t i = lo; i < hi; ++i)
+            auth[i] = clear_lsb(xor_delta_if(auth[i], mask[(size_t)i] != 0));
+        },
+        len);
   }
 
   // Authenticated AND: receive the prover's masking bit, fold it into the fresh
@@ -105,6 +127,44 @@ private:
     andgate_out_buffer[check_cnt] = auth;          // wire key for the check
     check_cnt++;
     return auth;
+  }
+
+  // Vectorized AND (batched + threaded), mirror of the prover: bulk-draw the
+  // wave's fresh COT keys, receive the masking bits in one ordered pass, then
+  // split the per-gate key reconstruction across the engine pool (each gate
+  // writes its own out / triple-buffer slot). Wire bytes and check folds are
+  // byte-identical to `len` scalar auth_compute_and calls. Crosses CHECK_SZ
+  // boundaries safely (runs the batch check inline).
+  void auth_compute_and(block *out, const block *a, const block *b,
+                        int64_t n) {
+    int64_t done = 0;
+    while (done < n) {
+      if (check_cnt == CHECK_SZ) {
+        andgate_correctness_check_manage();
+        check_cnt = 0;
+      }
+      const int64_t take = std::min<int64_t>(CHECK_SZ - check_cnt, n - done);
+      const int64_t base = check_cnt;
+      draw_cot_(out + done, take);                 // fresh COTs, in stream order
+      for (int64_t i = 0; i < take; ++i)           // ordered, wire-identical
+        and_bits_[(size_t)(base + i)] = io->recv_bit() ? 1 : 0;
+      block *lbuf = andgate_left_buffer.data() + base;
+      block *rbuf = andgate_right_buffer.data() + base;
+      block *obuf = andgate_out_buffer.data() + base;
+      run_parallel_(
+          [&](int64_t lo, int64_t hi) {
+            for (int64_t i = lo; i < hi; ++i) {
+              lbuf[i] = a[done + i];
+              rbuf[i] = b[done + i];
+              obuf[i] = clear_lsb(xor_delta_if(
+                  out[done + i], and_bits_[(size_t)(base + i)] != 0));
+              out[done + i] = obuf[i];
+            }
+          },
+          take);
+      check_cnt += take;
+      done += take;
+    }
   }
 
   // Output reveal: receive each claimed cleartext bit, recompute the

@@ -4,6 +4,7 @@
 #include "emp-ot/emp-ot.h"
 #include "emp-tool/emp-tool.h"
 #include <functional>
+#include <future>
 
 namespace emp {
 using namespace std;
@@ -29,6 +30,15 @@ public:
   // engine overrides it to share its threaded FIFO prefetch buffer so the one
   // COT stream stays ordered across all consumers.
   std::function<void(block *, int64_t)> draw_cot;
+  // Worker pool for the accumulate / batch-check sums (the bool analogue of
+  // arith's par_sum_ over FpOSTriple's pool). Standalone use stays serial;
+  // the bool engine points these at its own pool + n_threads.
+  ThreadPool *pool = nullptr;
+  int threads = 1;
+
+  // Below this per-call length the accumulate loop (one gfmul + XORs per
+  // element) is cheaper serial than the pool dispatch.
+  static constexpr int64_t kParMin = 4096;
 
   PolyProof(int party, IOChannel *io, Ferret *ferret)
       : party(party), io(io), delta(ferret->Delta), ferret(ferret), num(0) {
@@ -36,6 +46,72 @@ public:
     if (party == ALICE)
       buffer1.resize(buffer_sz);
     draw_cot = [this](block *o, int64_t n) { this->ferret->next_n(o, n); };
+  }
+
+  // Parallel XOR-fold of f(i, acc0, acc1) over [0,n): each worker folds a
+  // private accumulator pair; GF(2^128) accumulation is XOR, so combining the
+  // per-range partials is bit-identical to one serial pass. BOB-side callers
+  // just ignore the second accumulator lane.
+  template <typename Fn>
+  void par_accum_(int64_t n, Fn &&f, block &out0, block &out1) const {
+    if (threads <= 1 || pool == nullptr || n < kParMin) {
+      for (int64_t i = 0; i < n; ++i)
+        f(i, out0, out1);
+      return;
+    }
+    std::vector<block> part(2 * (size_t)threads, zero_block);
+    const int64_t width = n / threads;
+    std::vector<std::future<void>> fut;
+    for (int t = 0; t < threads - 1; ++t) {
+      const int64_t s = (int64_t)t * width, e = s + width;
+      fut.push_back(pool->enqueue([&part, t, s, e, &f]() {
+        block a0 = zero_block, a1 = zero_block;
+        for (int64_t i = s; i < e; ++i)
+          f(i, a0, a1);
+        part[2 * (size_t)t] = a0;
+        part[2 * (size_t)t + 1] = a1;
+      }));
+    }
+    block a0 = zero_block, a1 = zero_block;
+    for (int64_t i = (int64_t)(threads - 1) * width; i < n; ++i)
+      f(i, a0, a1);
+    part[2 * (size_t)(threads - 1)] = a0;
+    part[2 * (size_t)(threads - 1) + 1] = a1;
+    for (auto &fu : fut)
+      fu.get();
+    for (int t = 0; t < threads; ++t) {
+      out0 = out0 ^ part[2 * (size_t)t];
+      out1 = out1 ^ part[2 * (size_t)t + 1];
+    }
+  }
+
+  // Parallel chi inner product: split [0,n) into per-worker ranges, each
+  // reduced independently; GF(2^128) reduction is linear over XOR, so the
+  // XOR of the range sums equals the one-pass sum.
+  void par_inn_prdt_(block *out, const block *chi, const block *buf,
+                     int64_t n) const {
+    if (threads <= 1 || pool == nullptr || n < kParMin) {
+      vector_inn_prdt_sum_red(out, chi, buf, n);
+      return;
+    }
+    std::vector<block> part((size_t)threads, zero_block);
+    const int64_t width = n / threads;
+    std::vector<std::future<void>> fut;
+    for (int t = 0; t < threads - 1; ++t) {
+      const int64_t s = (int64_t)t * width;
+      fut.push_back(pool->enqueue([&part, &chi, &buf, t, s, width]() {
+        vector_inn_prdt_sum_red(&part[(size_t)t], chi + s, buf + s, width);
+      }));
+    }
+    const int64_t s = (int64_t)(threads - 1) * width;
+    vector_inn_prdt_sum_red(&part[(size_t)(threads - 1)], chi + s, buf + s,
+                            n - s);
+    for (auto &fu : fut)
+      fu.get();
+    block acc = zero_block;
+    for (int t = 0; t < threads; ++t)
+      acc = acc ^ part[(size_t)t];
+    *out = acc;
   }
 
   ~PolyProof() { batch_check(); }
@@ -53,8 +129,8 @@ public:
 
       uni_hash_coeff_gen(chi.data(), seed, num > 4 ? num : 4);
 
-      vector_inn_prdt_sum_red(check_sum, chi.data(), buffer.data(), num);
-      vector_inn_prdt_sum_red(check_sum + 1, chi.data(), buffer1.data(), num);
+      par_inn_prdt_(check_sum, chi.data(), buffer.data(), num);
+      par_inn_prdt_(check_sum + 1, chi.data(), buffer1.data(), num);
       draw_cot(ope_data, 128);
       block tmp;
       pack.packing(&tmp, ope_data);
@@ -80,7 +156,7 @@ public:
 
       uni_hash_coeff_gen(chi.data(), seed, num > 4 ? num : 4);
       block B;
-      vector_inn_prdt_sum_red(&B, chi.data(), buffer.data(), num);
+      par_inn_prdt_(&B, chi.data(), buffer.data(), num);
       draw_cot(ope_data, 128);
       block tmp;
       pack.packing(&tmp, ope_data);
@@ -129,16 +205,22 @@ public:
       batch_check();
     if (party == ALICE) {
       block A0 = zero_block, A1 = zero_block;
-      for (int64_t i = 0; i < len; ++i)
-        if (coeff[i + 1])
-          accumulate_alice(polyx[i], polyy[i], A0, A1);
+      par_accum_(len,
+                 [&](int64_t i, block &x0, block &x1) {
+                   if (coeff[i + 1])
+                     accumulate_alice(polyx[i], polyy[i], x0, x1);
+                 },
+                 A0, A1);
       buffer[num] = A0;
       buffer1[num] = A1;
     } else {
-      block B = zero_block;
-      for (int64_t i = 0; i < len; ++i)
-        if (coeff[i + 1])
-          accumulate_bob(polyx[i], polyy[i], B);
+      block B = zero_block, unused = zero_block;
+      par_accum_(len,
+                 [&](int64_t i, block &x0, block &) {
+                   if (coeff[i + 1])
+                     accumulate_bob(polyx[i], polyy[i], x0);
+                 },
+                 B, unused);
       B = B ^ bob_constant_term(coeff[0]);
       buffer[num] = B;
     }
@@ -151,14 +233,20 @@ public:
       batch_check();
     if (party == ALICE) {
       block A0 = zero_block, A1 = zero_block;
-      for (int64_t i = 0; i < len; ++i)
-        accumulate_alice(polyx[i], polyy[i], A0, A1);
+      par_accum_(len,
+                 [&](int64_t i, block &x0, block &x1) {
+                   accumulate_alice(polyx[i], polyy[i], x0, x1);
+                 },
+                 A0, A1);
       buffer[num] = A0;
       buffer1[num] = A1;
     } else {
-      block B = zero_block;
-      for (int64_t i = 0; i < len; ++i)
-        accumulate_bob(polyx[i], polyy[i], B);
+      block B = zero_block, unused = zero_block;
+      par_accum_(len,
+                 [&](int64_t i, block &x0, block &) {
+                   accumulate_bob(polyx[i], polyy[i], x0);
+                 },
+                 B, unused);
       B = B ^ bob_constant_term(constant);
       buffer[num] = B;
     }
@@ -171,18 +259,30 @@ public:
       batch_check();
     if (party == ALICE) {
       block A0 = zero_block, A1 = zero_block;
-      for (int64_t i = 0; i < len; ++i)
-        accumulate_alice(polyx[i], polyy[i], A0, A1);
-      for (int64_t i = 0; i < len2; ++i)
-        accumulate_alice(r[i], s[i], A0, A1);
+      par_accum_(len,
+                 [&](int64_t i, block &x0, block &x1) {
+                   accumulate_alice(polyx[i], polyy[i], x0, x1);
+                 },
+                 A0, A1);
+      par_accum_(len2,
+                 [&](int64_t i, block &x0, block &x1) {
+                   accumulate_alice(r[i], s[i], x0, x1);
+                 },
+                 A0, A1);
       buffer[num] = A0;
       buffer1[num] = A1;
     } else {
-      block B = zero_block;
-      for (int64_t i = 0; i < len; ++i)
-        accumulate_bob(polyx[i], polyy[i], B);
-      for (int64_t i = 0; i < len2; ++i)
-        accumulate_bob(r[i], s[i], B);
+      block B = zero_block, unused = zero_block;
+      par_accum_(len,
+                 [&](int64_t i, block &x0, block &) {
+                   accumulate_bob(polyx[i], polyy[i], x0);
+                 },
+                 B, unused);
+      par_accum_(len2,
+                 [&](int64_t i, block &x0, block &) {
+                   accumulate_bob(r[i], s[i], x0);
+                 },
+                 B, unused);
       buffer[num] = B;
     }
     num++;
@@ -194,19 +294,31 @@ public:
       batch_check();
     if (party == ALICE) {
       block A0 = zero_block, A1 = zero_block;
-      for (int64_t i = 0; i < len; ++i)
-        accumulate_alice(polyx[i], polyy[i], A0, A1);
-      for (int64_t i = 0; i < len2; ++i)
-        accumulate_alice(r[i], s[i], A0, A1);
+      par_accum_(len,
+                 [&](int64_t i, block &x0, block &x1) {
+                   accumulate_alice(polyx[i], polyy[i], x0, x1);
+                 },
+                 A0, A1);
+      par_accum_(len2,
+                 [&](int64_t i, block &x0, block &x1) {
+                   accumulate_alice(r[i], s[i], x0, x1);
+                 },
+                 A0, A1);
       accumulate_alice(*rr, *ss, A0, A1);
       buffer[num] = A0;
       buffer1[num] = A1;
     } else {
-      block B = zero_block;
-      for (int64_t i = 0; i < len; ++i)
-        accumulate_bob(polyx[i], polyy[i], B);
-      for (int64_t i = 0; i < len2; ++i)
-        accumulate_bob(r[i], s[i], B);
+      block B = zero_block, unused = zero_block;
+      par_accum_(len,
+                 [&](int64_t i, block &x0, block &) {
+                   accumulate_bob(polyx[i], polyy[i], x0);
+                 },
+                 B, unused);
+      par_accum_(len2,
+                 [&](int64_t i, block &x0, block &) {
+                   accumulate_bob(r[i], s[i], x0);
+                 },
+                 B, unused);
       accumulate_bob(*rr, *ss, B);
       buffer[num] = B;
     }
